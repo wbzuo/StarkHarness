@@ -61,6 +61,16 @@ export class HookDispatcher {
     return [...HOOK_EVENTS];
   }
 
+  listHandlers() {
+    const result = [];
+    for (const [event, handlers] of this.#hooks) {
+      for (const h of handlers) {
+        result.push({ event, matcher: h.matcher ?? '*' });
+      }
+    }
+    return result;
+  }
+
   snapshot() {
     const result = {};
     for (const [event, hooks] of this.#hooks) {

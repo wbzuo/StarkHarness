@@ -147,6 +147,14 @@ export function createCommandRegistry() {
       },
     },
     {
+      name: 'registry',
+      description: 'Show complete state of all registries — tools, commands, providers, plugins, hooks, skills, policy, conflicts',
+      async execute(runtime) {
+        const { buildDiagnostics } = await import('./diagnostics.js');
+        return buildDiagnostics(runtime);
+      },
+    },
+    {
       name: 'transcript',
       description: 'Replay the harness event log',
       async execute(runtime, args = {}) {

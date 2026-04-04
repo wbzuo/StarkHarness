@@ -66,6 +66,10 @@ export class SkillLoader {
     return refs;
   }
 
+  listDiscovered() {
+    return [...this.#metadata.values()];
+  }
+
   matchSkill(query) {
     const lower = query.toLowerCase();
     for (const [, meta] of this.#metadata) {
