@@ -52,7 +52,7 @@ StarkHarness is built on four distinct "Planes" of operation:
 
 ### 🔗 1. Hook Dispatcher (`src/kernel/hooks.js`)
 Modeled after the internal architecture of top-tier agents, the Hook system allows you to intercept any action:
-- `PreToolUse`: Validate or block tools before they run.
+- `PreToolUse`: Validate or block tools before they run. **Can also modify tool input.**
 - `PostToolUse`: Process tool output before the agent sees it.
 - `Stop`: Hooks can block exit if tests are failing or goals aren't met.
 
@@ -61,11 +61,25 @@ A robust sandbox with three predefined profiles:
 - 🔓 **Permissive**: Developer mode, all tools allowed.
 - 🛡️ **Safe**: Default mode, dangerous tools require confirmation.
 - 🔒 **Locked**: Read-only mode, no write/exec/network access.
+*Hierarchy: Tool-specific rules (e.g. `tools.shell: deny`) override Capability rules (e.g. `exec: allow`).*
 
 ### 📚 3. Memory & Skills
-- **Static Memory**: Follows the `CLAUDE.md` standard for project rules.
-- **Dynamic Memory**: Learned context stored in `.starkharness/memory/` with YAML frontmatter.
-- **Progressive Skills**: 3-level loading (Discovery ➔ Body ➔ References) to save tokens.
+- **Static Memory**: Follows the `CLAUDE.md` standard. Supports inheritance from both project and user-level files.
+- **Dynamic Memory**: Learned context stored in `.starkharness/memory/` with YAML metadata support.
+- **Progressive Skills**: 3-level loading (Discovery ➔ Body ➔ References) to optimize token usage.
+
+---
+
+## 🔍 Deep Dive into Built-in Tools
+
+| Tool | Capability | Key Features |
+| :--- | :--- | :--- |
+| `read_file` | `read` | Supports `offset` and `limit` for surgical reading of large files. |
+| `edit_file` | `write` | Exact string replacement with `replace_all` global support. |
+| `shell` | `exec` | Executed via `/bin/sh -c` with 120s default timeout and 4MB buffer. |
+| `search` | `read` | Full-text search with automatic `.git` and `node_modules` exclusion. |
+| `spawn_agent` | `delegate` | Create bounded child agents with specific roles and tool whitelists. |
+| `tasks` | `delegate` | Persistent task state machine (Create ➔ Update ➔ List). |
 
 ---
 

@@ -52,7 +52,7 @@ StarkHarness 构建在四个独立的操作“平面”之上：
 
 ### 🔗 1. 钩子调度器 (`src/kernel/hooks.js`)
 借鉴顶级 Agent 的内部架构，Hook 系统允许您拦截并修改任何操作：
-- `PreToolUse`: 在工具运行前进行验证或拦截。
+- `PreToolUse`: 在工具运行前验证或拦截。**同时支持静默修改工具输入参数。**
 - `PostToolUse`: 在 Agent 看到结果前处理工具输出。
 - `Stop`: 如果测试未通过或目标未达成，钩子可以阻止 Agent 退出。
 
@@ -61,11 +61,25 @@ StarkHarness 构建在四个独立的操作“平面”之上：
 - 🔓 **Permissive (宽松)**: 开发模式，允许所有工具。
 - 🛡️ **Safe (安全)**: 默认模式，危险操作需人工确认。
 - 🔒 **Locked (锁定)**: 只读模式，禁止写入、执行和网络访问。
+*优先级逻辑：具体工具规则（如 `tools.shell: deny`）会覆盖通用能力规则（如 `exec: allow`）。*
 
 ### 📚 3. 内存与技能
-- **静态内存**: 遵循 `CLAUDE.md` 标准，定义项目规则。
-- **动态内存**: 学习到的上下文存储在 `.starkharness/memory/` 中，支持 YAML 前置元数据。
+- **静态内存**: 遵循 `CLAUDE.md` 标准，支持项目级与用户级文件的继承合并。
+- **动态内存**: 学习到的上下文存储在 `.starkharness/memory/` 中，支持 YAML 元数据解析。
 - **渐进式技能**: 三级加载机制（发现 ➔ 正文 ➔ 引用），最大限度节省 Token 消耗。
+
+---
+
+## 🔍 内置工具深度解析
+
+| 工具 | 所属能力 | 核心特性 |
+| :--- | :--- | :--- |
+| `read_file` | `read` | 支持 `offset`（行偏移）和 `limit`（行限制），实现对大文件的外科手术式读取。 |
+| `edit_file` | `write` | 精确字符串替换，支持 `replace_all` 全局模式。 |
+| `shell` | `exec` | 通过 `/bin/sh -c` 执行，默认 120 秒超时，支持 4MB 输出缓冲。 |
+| `search` | `read` | 全文搜索，自动忽略 `.git`、`node_modules` 和 `.starkharness` 目录。 |
+| `spawn_agent` | `delegate` | 孵化具备特定角色和工具白名单的子 Agent。 |
+| `tasks` | `delegate` | 持久化任务状态机（创建 ➔ 更新 ➔ 列表）。 |
 
 ---
 
