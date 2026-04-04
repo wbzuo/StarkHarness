@@ -222,7 +222,14 @@ export class CommandRegistry {
   }
 
   registerPluginCommands(pluginCommands = []) {
+    const conflicts = [];
+    for (const pc of pluginCommands) {
+      if (this.#commands.has(pc.name)) {
+        conflicts.push({ type: 'command', name: pc.name, source: 'plugin-vs-builtin' });
+      }
+    }
     this.registerMany(pluginCommands.map(createPluginCommand));
+    return conflicts;
   }
 
   get(name) {

@@ -355,6 +355,22 @@ test('plugin diagnostics report conflicting command and tool names', async () =>
   assert.equal(plugins.diagnostics.toolConflicts.length, 1);
 });
 
+test('plugin-vs-builtin conflicts are detected in diagnostics', async () => {
+  const { runtime } = await makeRuntime({
+    plugins: [
+      { name: 'override-pack', version: '0.1.0', commands: [{ name: 'doctor' }], tools: [{ name: 'shell' }] },
+    ],
+  });
+
+  const plugins = await runtime.dispatchCommand('plugins');
+  const cmdConflict = plugins.diagnostics.commandConflicts.find((c) => c.source === 'plugin-vs-builtin');
+  const toolConflict = plugins.diagnostics.toolConflicts.find((c) => c.source === 'plugin-vs-builtin');
+  assert.ok(cmdConflict, 'should detect plugin overriding builtin command "doctor"');
+  assert.equal(cmdConflict.name, 'doctor');
+  assert.ok(toolConflict, 'should detect plugin overriding builtin tool "shell"');
+  assert.equal(toolConflict.name, 'shell');
+});
+
 test('replay-runner command produces plan and summary', async () => {
   const { runtime } = await makeRuntime();
   await runHarnessTurn(runtime, { tool: 'spawn_agent', input: { role: 'runner' } });

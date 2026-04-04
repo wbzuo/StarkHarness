@@ -63,14 +63,6 @@ export async function createRuntime(options = {}) {
   const tools = new ToolRegistry();
   const promptBuilder = new SystemPromptBuilder();
 
-  // Memory
-  const cwd = options.session?.cwd ?? process.cwd();
-  const memory = new MemoryManager({ projectDir: cwd });
-
-  // Skills
-  const skillsDir = path.join(cwd, 'skills');
-  const skills = new SkillLoader(skillsDir);
-
   for (const provider of createProviderBlueprint()) {
     providers.register(provider);
   }
@@ -81,8 +73,14 @@ export async function createRuntime(options = {}) {
   const telemetry = createTelemetrySink({ rootDir: stateDir });
   await telemetry.init();
 
+  // Determine session first, then derive cwd from it
   const session = resumed ?? createSession(options.session);
-  const context = createContextEnvelope({ cwd: session.cwd, mode: session.mode });
+  const cwd = session.cwd ?? process.cwd();
+  const context = createContextEnvelope({ cwd, mode: session.mode });
+
+  // Memory and skills bind to session.cwd (correct for both new and resumed sessions)
+  const memory = new MemoryManager({ projectDir: cwd });
+  const skills = new SkillLoader(path.join(cwd, 'skills'));
 
   if (options.pluginManifestPath) {
     await plugins.loadManifestFile(options.pluginManifestPath);
@@ -90,11 +88,12 @@ export async function createRuntime(options = {}) {
   for (const plugin of options.plugins ?? []) {
     plugins.register(plugin);
   }
-  tools.registerPluginTools(plugins.listTools());
-  const pluginDiagnostics = diagnosePluginConflicts(plugins);
+  const builtinToolConflicts = tools.registerPluginTools(plugins.listTools());
 
   const commands = new CommandRegistry(createCommandRegistry());
-  commands.registerPluginCommands(plugins.listCommands());
+  const builtinCommandConflicts = commands.registerPluginCommands(plugins.listCommands());
+
+  const pluginDiagnostics = diagnosePluginConflicts(plugins, { builtinToolConflicts, builtinCommandConflicts });
 
   // Register hook handlers from options
   for (const [eventName, hookList] of Object.entries(options.hooks ?? {})) {
@@ -152,37 +151,12 @@ export async function createRuntime(options = {}) {
     },
     async dispatchTurn(turn) {
       await this.log('turn:start', turn);
-      const tool = this.tools.get(turn.tool);
-      if (!tool) throw new Error(`Unknown tool: ${turn.tool}`);
-
-      const gate = this.permissions.evaluate({ capability: tool.capability, toolName: tool.name });
-      if (gate.decision === 'deny') {
-        const denied = { ok: false, reason: 'permission-denied', tool: tool.name, gate };
-        await this.log('turn:denied', denied);
-        return denied;
+      const result = await this.loop.executeTurn(turn);
+      if (result.ok) {
+        this.session.turns.push({ turn, result, recordedAt: new Date().toISOString() });
+        await this.persist();
       }
-      if (gate.decision === 'ask') {
-        const gated = { ok: false, reason: 'permission-escalation-required', tool: tool.name, gate };
-        await this.log('turn:gated', gated);
-        return gated;
-      }
-
-      // PreToolUse hook
-      const preResult = await this.hooks.fire('PreToolUse', { toolName: tool.name, toolInput: turn.input });
-      if (preResult.decision === 'deny') {
-        const denied = { ok: false, reason: 'hook-denied', tool: tool.name, hookReason: preResult.reason };
-        await this.log('turn:hook-denied', denied);
-        return denied;
-      }
-
-      const result = await tool.execute(preResult.updatedInput ?? turn.input, this);
-
-      // PostToolUse hook
-      await this.hooks.fire('PostToolUse', { toolName: tool.name, toolInput: turn.input, toolResult: result });
-
-      this.session.turns.push({ turn, result, recordedAt: new Date().toISOString() });
-      await this.persist();
-      await this.log('turn:complete', { turn, result });
+      await this.log(result.ok ? 'turn:complete' : `turn:${result.reason}`, { turn, result });
       return result;
     },
     async dispatchCommand(name, args = {}) {

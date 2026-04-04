@@ -23,7 +23,14 @@ export class ToolRegistry {
   }
 
   registerPluginTools(pluginTools = []) {
+    const conflicts = [];
+    for (const pt of pluginTools) {
+      if (this.#tools.has(pt.name)) {
+        conflicts.push({ type: 'tool', name: pt.name, source: 'plugin-vs-builtin' });
+      }
+    }
     this.registerMany(pluginTools.map(createPluginTool));
+    return conflicts;
   }
 
   get(name) {
