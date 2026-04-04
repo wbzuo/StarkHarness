@@ -1,41 +1,22 @@
 #!/usr/bin/env node
-import { createRuntime, createBlueprintDocument } from './kernel/runtime.js';
-import { runHarnessTurn } from './kernel/loop.js';
+import { createRuntime } from './kernel/runtime.js';
 
 async function main(argv = process.argv.slice(2)) {
   const command = argv[0] ?? 'blueprint';
+  const commandArg = argv[1];
+
   const runtime = await createRuntime({
     session: { goal: 'bootstrap StarkHarness', mode: 'interactive' },
+    resumeSessionId: command === 'resume' ? commandArg : undefined,
   });
 
-  switch (command) {
-    case 'blueprint': {
-      console.log(JSON.stringify(createBlueprintDocument(runtime), null, 2));
-      return;
-    }
-    case 'doctor': {
-      const report = {
-        ok: true,
-        providers: runtime.providers.list().length,
-        tools: runtime.tools.list().length,
-        commands: runtime.commands.length,
-        capabilityDomains: Object.keys(runtime.capabilities).length,
-        sessionPath: runtime.state.getSessionPath(runtime.session.id),
-      };
-      console.log(JSON.stringify(report, null, 2));
-      return;
-    }
-    case 'run': {
-      const result = await runHarnessTurn(runtime, {
-        tool: 'read_file',
-        input: { path: `.starkharness/sessions/${runtime.session.id}.json` },
-      });
-      console.log(JSON.stringify(result, null, 2));
-      return;
-    }
-    default:
-      console.error(`Unknown command: ${command}`);
-      process.exitCode = 1;
+  try {
+    const commandName = command === 'resume' ? 'resume' : command;
+    const result = await runtime.dispatchCommand(commandName);
+    console.log(JSON.stringify(result, null, 2));
+  } catch (error) {
+    console.error(error instanceof Error ? error.message : String(error));
+    process.exitCode = 1;
   }
 }
 

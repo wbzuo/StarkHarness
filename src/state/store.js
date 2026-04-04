@@ -5,6 +5,7 @@ export class StateStore {
   constructor({ rootDir }) {
     this.rootDir = rootDir;
     this.sessionDir = path.join(rootDir, 'sessions');
+    this.runtimePath = path.join(rootDir, 'runtime.json');
   }
 
   async init() {
@@ -25,6 +26,16 @@ export class StateStore {
   async loadSession(sessionId) {
     const target = this.getSessionPath(sessionId);
     const content = await readFile(target, 'utf8');
+    return JSON.parse(content);
+  }
+
+  async saveRuntimeSnapshot(snapshot) {
+    await writeFile(this.runtimePath, JSON.stringify(snapshot, null, 2), 'utf8');
+    return this.runtimePath;
+  }
+
+  async loadRuntimeSnapshot() {
+    const content = await readFile(this.runtimePath, 'utf8');
     return JSON.parse(content);
   }
 }

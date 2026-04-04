@@ -10,18 +10,37 @@ import { ProviderRegistry, createProviderBlueprint } from '../providers/index.js
 import { ToolRegistry } from '../tools/registry.js';
 import { createBuiltinTools } from '../tools/builtins/index.js';
 import { createCapabilityMap } from '../capabilities/index.js';
-import { createCommandRegistry } from '../commands/registry.js';
+import { createCommandRegistry, CommandRegistry } from '../commands/registry.js';
 import { createWorkspaceBlueprint } from '../workspace/index.js';
 import { createBridgeBlueprint } from '../bridge/index.js';
 import { createReplBlueprint } from '../ui/repl.js';
 import { createTelemetrySink } from '../telemetry/index.js';
 import { StateStore } from '../state/store.js';
 
+function createSnapshot(runtime) {
+  return {
+    session: runtime.session,
+    tasks: runtime.tasks.snapshot(),
+    agents: runtime.agents.snapshot(),
+  };
+}
+
 export async function createRuntime(options = {}) {
+  const stateDir = options.stateDir ?? path.join(options.session?.cwd ?? process.cwd(), '.starkharness');
+  const state = new StateStore({ rootDir: stateDir });
+  await state.init();
+
+  const resumed = options.resumeSessionId
+    ? await state.loadSession(options.resumeSessionId)
+    : null;
+  const runtimeSnapshot = options.resumeSessionId
+    ? await state.loadRuntimeSnapshot().catch(() => ({ tasks: [], agents: [] }))
+    : { tasks: [], agents: [] };
+
   const events = new EventBus();
   const permissions = new PermissionEngine(options.permissions);
-  const tasks = new TaskStore();
-  const agents = new AgentManager();
+  const tasks = new TaskStore(runtimeSnapshot.tasks ?? []);
+  const agents = new AgentManager(runtimeSnapshot.agents ?? []);
   const plugins = new PluginLoader();
   const providers = new ProviderRegistry();
   const tools = new ToolRegistry();
@@ -35,13 +54,9 @@ export async function createRuntime(options = {}) {
   }
 
   const telemetry = createTelemetrySink();
-  const session = createSession(options.session);
+  const session = resumed ?? createSession(options.session);
   const context = createContextEnvelope({ cwd: session.cwd, mode: session.mode });
-  const state = new StateStore({
-    rootDir: options.stateDir ?? path.join(context.cwd, '.starkharness'),
-  });
-
-  await state.init();
+  const commands = new CommandRegistry(createCommandRegistry());
 
   const runtime = {
     session,
@@ -55,11 +70,15 @@ export async function createRuntime(options = {}) {
     tools,
     telemetry,
     state,
-    commands: createCommandRegistry(),
+    commands,
     capabilities: createCapabilityMap(),
     workspace: createWorkspaceBlueprint(),
     bridge: createBridgeBlueprint(),
     ui: createReplBlueprint(),
+    async persist() {
+      await this.state.saveSession(this.session);
+      await this.state.saveRuntimeSnapshot(createSnapshot(this));
+    },
     async dispatchTurn(turn) {
       const tool = this.tools.get(turn.tool);
       if (!tool) throw new Error(`Unknown tool: ${turn.tool}`);
@@ -78,12 +97,15 @@ export async function createRuntime(options = {}) {
         result,
         recordedAt: new Date().toISOString(),
       });
-      await this.state.saveSession(this.session);
+      await this.persist();
       return result;
+    },
+    async dispatchCommand(name) {
+      return this.commands.dispatch(name, this);
     },
   };
 
-  await runtime.state.saveSession(runtime.session);
+  await runtime.persist();
   return runtime;
 }
 
@@ -92,7 +114,7 @@ export function createBlueprintDocument(runtime) {
     name: 'StarkHarness',
     session: runtime.session,
     kernel: ['session', 'runtime', 'loop', 'context', 'events'],
-    commands: runtime.commands,
+    commands: runtime.commands.list(),
     providers: runtime.providers.list(),
     tools: runtime.tools.list().map(({ name, capability, description }) => ({
       name,
@@ -103,9 +125,14 @@ export function createBlueprintDocument(runtime) {
     workspace: runtime.workspace,
     bridge: runtime.bridge,
     ui: runtime.ui,
+    orchestration: {
+      taskCount: runtime.tasks.list().length,
+      agentCount: runtime.agents.list().length,
+    },
     persistence: {
       rootDir: runtime.state.rootDir,
       sessionPath: runtime.state.getSessionPath(runtime.session.id),
+      runtimePath: runtime.state.runtimePath,
     },
   };
 }

@@ -3,19 +3,46 @@ export class ProviderRegistry {
 
   register(provider) {
     if (!provider?.id) throw new Error('Provider requires id');
+    if (typeof provider.complete !== 'function') {
+      throw new Error(`Provider ${provider.id} must implement complete()`);
+    }
     this.#providers.set(provider.id, provider);
     return provider;
   }
 
-  list() {
-    return [...this.#providers.values()];
+  get(id) {
+    return this.#providers.get(id);
   }
+
+  list() {
+    return [...this.#providers.values()].map(({ id, purpose, modelFamily }) => ({
+      id,
+      purpose,
+      modelFamily,
+    }));
+  }
+}
+
+function createProvider(id, purpose, modelFamily) {
+  return {
+    id,
+    purpose,
+    modelFamily,
+    async complete(request) {
+      return {
+        provider: id,
+        modelFamily,
+        request,
+        status: 'stubbed',
+      };
+    },
+  };
 }
 
 export function createProviderBlueprint() {
   return [
-    { id: 'anthropic', purpose: 'Claude-class provider adapter' },
-    { id: 'openai', purpose: 'Codex/GPT-class provider adapter' },
-    { id: 'compatible', purpose: 'OpenAI/Anthropic-compatible gateway adapter' },
+    createProvider('anthropic', 'Claude-class provider adapter', 'claude'),
+    createProvider('openai', 'Codex/GPT-class provider adapter', 'gpt'),
+    createProvider('compatible', 'OpenAI/Anthropic-compatible gateway adapter', 'compatible'),
   ];
 }

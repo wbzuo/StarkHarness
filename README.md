@@ -52,14 +52,15 @@ node src/main.js doctor
 - Boots a working runtime.
 - Registers core tools/capabilities.
 - Exposes machine-readable blueprint output.
-- Persists session state under `.starkharness/sessions/`.
+- Persists session state plus runtime orchestration snapshots under `.starkharness/`.
 - Ships real read/write/edit/search/glob/shell tool paths behind unified permissions.
+- Supports command dispatch, provider contracts, and session resume.
 - Verifies the dependency-free harness shape in tests.
 
 ## What comes next
 
-1. Replace placeholder tools with real implementations.
-2. Add transcript persistence and resume.
-3. Add provider adapters.
-4. Add MCP/LSP/bridge integration.
-5. Add team/swarm execution semantics.
+1. Add configurable policy files and sandbox profiles.
+2. Extend provider adapters from stub contracts into real model backends.
+3. Add MCP/LSP/bridge integration.
+4. Add transcript replay and richer CLI/REPL dispatch.
+5. Add team/swarm execution semantics and plugin-backed capability loading.

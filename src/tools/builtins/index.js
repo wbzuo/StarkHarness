@@ -147,19 +147,57 @@ function createFetchUrlTool() {
   });
 }
 
-function placeholder(name, capability, description) {
+function createSpawnAgentTool() {
   return defineTool({
-    name,
-    capability,
-    description,
-    async execute(input = {}) {
-      return {
-        ok: true,
-        tool: name,
-        capability,
-        input,
-        note: 'placeholder implementation',
+    name: 'spawn_agent',
+    capability: 'delegate',
+    description: 'Spawn a bounded child agent',
+    async execute(input = {}, runtime) {
+      const agent = runtime.agents.spawn(input);
+      await runtime.persist();
+      return { ok: true, tool: 'spawn_agent', agent };
+    },
+  });
+}
+
+function createSendMessageTool() {
+  return defineTool({
+    name: 'send_message',
+    capability: 'delegate',
+    description: 'Send messages between agents',
+    async execute(input = {}, runtime) {
+      const message = {
+        from: input.from ?? 'runtime',
+        to: input.to ?? 'agent-1',
+        body: input.body ?? '',
+        sentAt: new Date().toISOString(),
       };
+      runtime.session.messages = [...(runtime.session.messages ?? []), message];
+      await runtime.persist();
+      return { ok: true, tool: 'send_message', message };
+    },
+  });
+}
+
+function createTasksTool() {
+  return defineTool({
+    name: 'tasks',
+    capability: 'delegate',
+    description: 'Manage task state',
+    async execute(input = {}, runtime) {
+      let task;
+      switch (input.action) {
+        case 'create':
+          task = runtime.tasks.create(input.task ?? {});
+          break;
+        case 'update':
+          task = runtime.tasks.update(input.id, input.patch ?? {});
+          break;
+        default:
+          return { ok: true, tool: 'tasks', tasks: runtime.tasks.list() };
+      }
+      await runtime.persist();
+      return { ok: true, tool: 'tasks', task, tasks: runtime.tasks.list() };
     },
   });
 }
@@ -173,8 +211,8 @@ export function createBuiltinTools() {
     createSearchTool(),
     createGlobTool(),
     createFetchUrlTool(),
-    placeholder('spawn_agent', 'delegate', 'Spawn a bounded child agent'),
-    placeholder('send_message', 'delegate', 'Send messages between agents'),
-    placeholder('tasks', 'delegate', 'Manage task state'),
+    createSpawnAgentTool(),
+    createSendMessageTool(),
+    createTasksTool(),
   ];
 }

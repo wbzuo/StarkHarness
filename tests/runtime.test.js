@@ -1,17 +1,17 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createRuntime, createBlueprintDocument } from '../src/kernel/runtime.js';
-import { runHarnessTurn } from '../src/kernel/loop.js';
-
 import { mkdtemp, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
+import { createRuntime, createBlueprintDocument } from '../src/kernel/runtime.js';
+import { runHarnessTurn } from '../src/kernel/loop.js';
 
-async function makeRuntime() {
+async function makeRuntime(options = {}) {
   const root = await mkdtemp(path.join(os.tmpdir(), 'starkharness-'));
   const runtime = await createRuntime({
     stateDir: path.join(root, '.starkharness'),
     session: { cwd: root, goal: 'test-runtime' },
+    ...options,
   });
   return { runtime, root };
 }
@@ -24,6 +24,7 @@ test('runtime boots with full blueprint surfaces', async () => {
   assert.equal(runtime.providers.list().length, 3);
   assert.equal(runtime.tools.list().length, 10);
   assert.ok(blueprint.capabilities.advanced.includes('voice'));
+  assert.equal(blueprint.orchestration.taskCount, 0);
 });
 
 test('permission engine blocks ask-gated tools by default', async () => {
@@ -101,4 +102,59 @@ test('search and glob tools inspect workspace contents', async () => {
   });
   assert.equal(globResult.ok, true);
   assert.equal(globResult.matches[0], path.join(root, 'docs/alpha.txt'));
+});
+
+test('delegate tools persist agents tasks and messages', async () => {
+  const { runtime } = await makeRuntime();
+  const agentResult = await runHarnessTurn(runtime, {
+    tool: 'spawn_agent',
+    input: { role: 'reviewer', scope: 'src' },
+  });
+  assert.equal(agentResult.ok, true);
+  assert.equal(runtime.agents.list().length, 1);
+
+  const taskResult = await runHarnessTurn(runtime, {
+    tool: 'tasks',
+    input: { action: 'create', task: { subject: 'Design provider contract' } },
+  });
+  assert.equal(taskResult.ok, true);
+  assert.equal(runtime.tasks.list().length, 1);
+
+  const messageResult = await runHarnessTurn(runtime, {
+    tool: 'send_message',
+    input: { to: agentResult.agent.id, body: 'Review provider abstraction' },
+  });
+  assert.equal(messageResult.ok, true);
+  assert.equal(runtime.session.messages.length, 1);
+
+  const snapshot = await runtime.state.loadRuntimeSnapshot();
+  assert.equal(snapshot.agents.length, 1);
+  assert.equal(snapshot.tasks.length, 1);
+});
+
+test('command dispatch and resume hydrate persisted state', async () => {
+  const { runtime, root } = await makeRuntime();
+  await runHarnessTurn(runtime, {
+    tool: 'spawn_agent',
+    input: { role: 'architect' },
+  });
+  await runHarnessTurn(runtime, {
+    tool: 'tasks',
+    input: { action: 'create', task: { subject: 'Implement resume flow' } },
+  });
+
+  const providers = await runtime.dispatchCommand('providers');
+  assert.equal(providers.length, 3);
+
+  const resumed = await createRuntime({
+    stateDir: path.join(root, '.starkharness'),
+    resumeSessionId: runtime.session.id,
+  });
+  assert.equal(resumed.session.id, runtime.session.id);
+  assert.equal(resumed.agents.list().length, 1);
+  assert.equal(resumed.tasks.list().length, 1);
+
+  const resumedSession = await resumed.dispatchCommand('resume');
+  assert.equal(resumedSession.id, runtime.session.id);
+  assert.equal(resumedSession.turns.length, runtime.session.turns.length);
 });

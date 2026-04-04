@@ -1,6 +1,10 @@
 export class TaskStore {
   #tasks = new Map();
 
+  constructor(initialTasks = []) {
+    initialTasks.forEach((task) => this.#tasks.set(task.id, task));
+  }
+
   create(task) {
     const next = {
       id: task.id ?? `task-${this.#tasks.size + 1}`,
@@ -22,5 +26,9 @@ export class TaskStore {
     const next = { ...current, ...patch };
     this.#tasks.set(id, next);
     return next;
+  }
+
+  snapshot() {
+    return this.list();
   }
 }
