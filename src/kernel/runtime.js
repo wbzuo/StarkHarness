@@ -1,5 +1,8 @@
 import path from 'node:path';
 import { EventBus } from './events.js';
+import { HookDispatcher } from './hooks.js';
+import { AgentLoop } from './loop.js';
+import { SystemPromptBuilder } from './prompt.js';
 import { createContextEnvelope } from './context.js';
 import { createSession } from './session.js';
 import { PermissionEngine } from '../permissions/engine.js';
@@ -20,6 +23,8 @@ import { StateStore } from '../state/store.js';
 import { loadPolicyFile, mergePolicy } from '../permissions/policy.js';
 import { getSandboxProfile } from '../permissions/profiles.js';
 import { diagnosePluginConflicts } from '../plugins/diagnostics.js';
+import { MemoryManager } from '../memory/index.js';
+import { SkillLoader } from '../skills/loader.js';
 
 function createSnapshot(runtime) {
   return {
@@ -28,6 +33,7 @@ function createSnapshot(runtime) {
     agents: runtime.agents.snapshot(),
     permissions: runtime.permissions.snapshot(),
     plugins: runtime.plugins.snapshot(),
+    hooks: runtime.hooks.snapshot(),
   };
 }
 
@@ -48,17 +54,26 @@ export async function createRuntime(options = {}) {
   const policy = mergePolicy(profilePolicy, filePolicy);
 
   const events = new EventBus();
+  const hooks = new HookDispatcher();
   const permissions = new PermissionEngine({ ...runtimeSnapshot.permissions, ...policy, ...options.permissions });
   const tasks = new TaskStore(runtimeSnapshot.tasks ?? []);
   const agents = new AgentManager(runtimeSnapshot.agents ?? []);
   const plugins = new PluginLoader(runtimeSnapshot.plugins ?? []);
   const providers = new ProviderRegistry(providerConfig);
   const tools = new ToolRegistry();
+  const promptBuilder = new SystemPromptBuilder();
+
+  // Memory
+  const cwd = options.session?.cwd ?? process.cwd();
+  const memory = new MemoryManager({ projectDir: cwd });
+
+  // Skills
+  const skillsDir = path.join(cwd, 'skills');
+  const skills = new SkillLoader(skillsDir);
 
   for (const provider of createProviderBlueprint()) {
     providers.register(provider);
   }
-
   for (const tool of createBuiltinTools()) {
     tools.register(tool);
   }
@@ -68,23 +83,49 @@ export async function createRuntime(options = {}) {
 
   const session = resumed ?? createSession(options.session);
   const context = createContextEnvelope({ cwd: session.cwd, mode: session.mode });
+
   if (options.pluginManifestPath) {
     await plugins.loadManifestFile(options.pluginManifestPath);
   }
   for (const plugin of options.plugins ?? []) {
     plugins.register(plugin);
   }
-
   tools.registerPluginTools(plugins.listTools());
   const pluginDiagnostics = diagnosePluginConflicts(plugins);
 
   const commands = new CommandRegistry(createCommandRegistry());
   commands.registerPluginCommands(plugins.listCommands());
 
+  // Register hook handlers from options
+  for (const [eventName, hookList] of Object.entries(options.hooks ?? {})) {
+    for (const hook of Array.isArray(hookList) ? hookList : [hookList]) {
+      hooks.register(eventName, hook);
+    }
+  }
+
+  // Fire SessionStart hooks
+  const sessionStartResult = await hooks.fire('SessionStart', { sessionId: session.id, cwd: session.cwd });
+
+  // Build system prompt
+  const { claudeMd, memoryString } = await memory.toPromptStrings();
+  const systemPrompt = promptBuilder.build({
+    tools: tools.toSchemaList(),
+    claudeMd,
+    memory: memoryString,
+    hookContext: sessionStartResult.additionalContext ?? '',
+    cwd: session.cwd,
+  });
+  context.systemPrompt = systemPrompt;
+
+  // Agent loop
+  const loop = new AgentLoop({ hooks, tools, permissions });
+
   const runtime = {
     session,
     context,
     events,
+    hooks,
+    loop,
     permissions,
     tasks,
     agents,
@@ -95,6 +136,9 @@ export async function createRuntime(options = {}) {
     telemetry,
     state,
     commands,
+    memory,
+    skills,
+    promptBuilder,
     capabilities: createCapabilityMap(),
     workspace: createWorkspaceBlueprint(),
     bridge: createBridgeBlueprint(),
@@ -123,12 +167,20 @@ export async function createRuntime(options = {}) {
         return gated;
       }
 
-      const result = await tool.execute(turn.input, this);
-      this.session.turns.push({
-        turn,
-        result,
-        recordedAt: new Date().toISOString(),
-      });
+      // PreToolUse hook
+      const preResult = await this.hooks.fire('PreToolUse', { toolName: tool.name, toolInput: turn.input });
+      if (preResult.decision === 'deny') {
+        const denied = { ok: false, reason: 'hook-denied', tool: tool.name, hookReason: preResult.reason };
+        await this.log('turn:hook-denied', denied);
+        return denied;
+      }
+
+      const result = await tool.execute(preResult.updatedInput ?? turn.input, this);
+
+      // PostToolUse hook
+      await this.hooks.fire('PostToolUse', { toolName: tool.name, toolInput: turn.input, toolResult: result });
+
+      this.session.turns.push({ turn, result, recordedAt: new Date().toISOString() });
       await this.persist();
       await this.log('turn:complete', { turn, result });
       return result;
@@ -141,6 +193,7 @@ export async function createRuntime(options = {}) {
     },
   };
 
+  loop.setRuntime(runtime);
   await runtime.persist();
   await runtime.log('runtime:boot', { sessionId: runtime.session.id, stateDir, resumed: Boolean(options.resumeSessionId) });
   return runtime;
@@ -150,14 +203,10 @@ export function createBlueprintDocument(runtime) {
   return {
     name: 'StarkHarness',
     session: runtime.session,
-    kernel: ['session', 'runtime', 'loop', 'context', 'events'],
+    kernel: ['session', 'runtime', 'loop', 'context', 'events', 'hooks', 'prompt'],
     commands: runtime.commands.list(),
     providers: runtime.providers.list(),
-    tools: runtime.tools.list().map(({ name, capability, description }) => ({
-      name,
-      capability,
-      description,
-    })),
+    tools: runtime.tools.list().map(({ name, capability, description }) => ({ name, capability, description })),
     capabilities: runtime.capabilities,
     workspace: runtime.workspace,
     bridge: runtime.bridge,
@@ -168,6 +217,7 @@ export function createBlueprintDocument(runtime) {
       pluginCount: runtime.plugins.list().length,
       commandCount: runtime.commands.list().length,
       toolCount: runtime.tools.list().length,
+      hookEventCount: runtime.hooks.listEvents().length,
       pluginConflictCount: runtime.pluginDiagnostics.commandConflicts.length + runtime.pluginDiagnostics.toolConflicts.length,
     },
     policy: runtime.permissions.snapshot(),
