@@ -92,6 +92,29 @@ export async function createRuntime(options = {}) {
   }
   const builtinToolConflicts = tools.registerPluginTools(plugins.listTools());
 
+  // MCP server loading (optional)
+  const mcpClients = new Map();
+  if (options.mcpConfig) {
+    const { parseMcpConfig, validateMcpServer } = await import('../mcp/config.js');
+    const { McpStdioClient } = await import('../mcp/client.js');
+    const { createMcpToolProxy } = await import('../mcp/tools.js');
+    const servers = parseMcpConfig(options.mcpConfig);
+    for (const server of servers.filter((s) => !s.disabled)) {
+      if (!validateMcpServer(server).valid) continue;
+      try {
+        const client = new McpStdioClient(server.name, server);
+        await client.connect();
+        const mcpTools = await client.listTools();
+        for (const t of mcpTools) {
+          tools.register(createMcpToolProxy(server.name, t, client));
+        }
+        mcpClients.set(server.name, client);
+      } catch (err) {
+        await telemetry.emit('mcp:error', { server: server.name, error: err.message });
+      }
+    }
+  }
+
   const commands = new CommandRegistry(createCommandRegistry());
 
   // Auto-discover filesystem commands (user-level → project-level, later overrides earlier)
@@ -153,6 +176,7 @@ export async function createRuntime(options = {}) {
     tasks,
     agents,
     plugins,
+    mcpClients,
     providers,
     pluginDiagnostics,
     tools,
