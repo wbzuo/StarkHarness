@@ -8,17 +8,20 @@ export function createAnthropicProvider(config = {}) {
 
   // Fall back to stub if no API key
   if (!apiKey) {
-    return createStubProvider({
+    const stub = createStubProvider({
       id: 'anthropic',
       purpose: 'Claude-class provider adapter (stub — set ANTHROPIC_API_KEY to enable)',
       modelFamily: 'claude',
     });
+    stub.capabilities = ['chat'];
+    return stub;
   }
 
   return {
     id: 'anthropic',
     purpose: 'Claude-class provider adapter',
     modelFamily: 'claude',
+    capabilities: ['chat', 'tools', 'vision'],
     async complete({ systemPrompt, messages, tools, prompt, ...rest }) {
       // Support both old (prompt-based) and new (messages-based) calling conventions
       const effectiveMessages = messages ?? (prompt ? [{ role: 'user', content: prompt }] : []);

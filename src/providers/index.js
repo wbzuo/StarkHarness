@@ -1,6 +1,7 @@
 import { createAnthropicProvider } from './anthropic.js';
 import { createOpenAIProvider } from './openai.js';
 import { createCompatibleProvider } from './compatible.js';
+import { ModelStrategy, withRetry } from './strategy.js';
 
 export class ProviderRegistry {
   #providers = new Map();
@@ -39,6 +40,18 @@ export class ProviderRegistry {
   describeConfig() {
     return Object.fromEntries(
       Object.entries(this.config).map(([id, value]) => [id, Object.keys(value)]),
+    );
+  }
+
+  async completeWithStrategy({ capability = 'chat', prefer, request, retryOptions } = {}) {
+    const strategy = new ModelStrategy({
+      providers: this.list().map((p) => ({ ...p, capabilities: p.capabilities ?? ['chat'] })),
+    });
+    const providerId = strategy.select({ require: capability, prefer });
+    if (!providerId) throw new Error(`No provider available for capability: ${capability}`);
+    return withRetry(
+      () => this.complete(providerId, request),
+      retryOptions,
     );
   }
 }
