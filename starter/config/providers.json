@@ -1,0 +1,10 @@
+{
+  "anthropic": {
+    "model": "claude-sonnet-4-20250514",
+    "maxTokens": 8192
+  },
+  "openai": {
+    "model": "gpt-4o",
+    "baseUrl": "https://api.openai.com/v1"
+  }
+}

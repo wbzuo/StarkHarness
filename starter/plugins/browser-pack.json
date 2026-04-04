@@ -1,0 +1,12 @@
+{
+  "name": "browser-pack",
+  "version": "0.1.0",
+  "capabilities": ["browser", "dom-inspect"],
+  "tools": [
+    {
+      "name": "browser_navigate",
+      "capability": "network",
+      "description": "Navigate to a URL in headless browser"
+    }
+  ]
+}

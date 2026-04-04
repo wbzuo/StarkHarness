@@ -1,0 +1,7 @@
+{
+  "read": "allow",
+  "write": "ask",
+  "exec": "ask",
+  "network": "ask",
+  "delegate": "allow"
+}
