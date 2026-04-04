@@ -11,17 +11,9 @@
 
 ### 🚀 "Claude Code" 级别的 AI Agent 运行时脚手架
 
-**StarkHarness** 是一个专为构建全功能 AI 编程助手而设计的原子化、高强度运行框架。它剥离了产品外壳的复杂性，提供了一个干净、可测试且**零外部依赖**的内核，完美复刻了 Claude Code 等世界级 Agent 的核心运行逻辑。
+**StarkHarness** 是一个原子化、高强度的运行框架，专为构建全功能 AI 编程助手而设计。它剥离了产品外壳的复杂性，提供了一个干净、可测试且**零外部依赖**的内核，实现了 Claude Code 等世界级 Agent 的核心运行逻辑。
 
 > [**English**](./README.md) | [**简体中文**]
-
----
-
-## 💎 核心理念
-
-| 🛡️ 安全第一 | ⚙️ 精密机械 | 🧩 极致模块化 |
-| :--- | :--- | :--- |
-| **三级沙箱模型**（允许/询问/拒绝），支持工具级规则覆盖，确保内核级安全。 | **9 阶段钩子生命周期**，允许在 Agent 思考循环的每一个微小环节进行外科手术式干预。 | **零外部依赖**。完全基于 Node.js 20+ 原生能力构建，无需 `npm install`。 |
 
 ---
 
@@ -50,56 +42,77 @@ StarkHarness 在四个专业平面之间编排复杂的数据流：
 
 ---
 
-## 🛠 关键机制与实战指南
+## 🛠 开发者指南：扩展框架
 
-### 🔗 1. 钩子流水线 (`src/kernel/hooks.js`)
-拦截并修改 Agent 的行为逻辑。
-- **`PreToolUse`**: 拦截危险操作，或在执行前**静默修改工具参数**（如重定向路径）。
-- **`PostToolUse`**: 在工具输出到达 LLM 前进行脱敏或预处理。
-- **`Stop`**: 如果核心目标（如单元测试通过）未达成，可强制阻止 Agent 退出。
+StarkHarness 采用了极致的插件化设计，您可以轻松扩展其能力：
 
-### 🛡️ 2. 层级权限系统 (`src/permissions/`)
-- **默认策略**: 基于能力的宽泛控制（如 `exec: ask`）。
-- **工具覆盖**: 具体的工具规则（如 `tools.shell: deny`）具有最高优先级。
-- **沙箱预设**: 提供 `permissive`（宽松）、`safe`（安全，默认）和 `locked`（只读）三种模式。
+### 1. 定义新工具 (`src/tools/`)
+工具必须严格遵守 JSON Schema 契约，以便与 LLM 兼容。
 
-### 📚 3. 渐进式技能与内存
-- **三级加载技能**: `发现` ➔ `正文` ➔ `引用`。按需加载，最大限度压缩 Token 成本。
-- **双层内存**: 静态的 `CLAUDE.md` 项目规则 + 动态的 YAML 前置元数据（位于 `.starkharness/memory/`）。
+```javascript
+import { defineTool } from './types.js';
+
+export const myTool = defineTool({
+  name: 'git_status',
+  capability: 'read',
+  description: '获取当前 git 仓库的状态。',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      include_untracked: { type: 'boolean', default: true }
+    }
+  },
+  async execute(input, runtime) {
+    // 访问运行时的当前工作目录或上下文
+    const { stdout } = await runtime.shell('git status --short');
+    return { ok: true, status: stdout };
+  }
+});
+```
+
+### 2. 注册生命周期钩子 (`src/kernel/hooks.js`)
+钩子允许您在 Agent 的 Turn Loop 中注入自定义逻辑。
+
+```javascript
+// 注册 PreToolUse 钩子来增强安全性
+runtime.hooks.register('PreToolUse', {
+  matcher: 'shell',
+  handler: async (ctx) => {
+    if (ctx.toolInput.command.includes('sudo')) {
+      return { decision: 'deny', reason: '禁止使用 sudo 命令。' };
+    }
+    return { decision: 'allow' };
+  }
+});
+```
 
 ---
 
 ## 🔍 深度解析：内置能力特性
 
-| 工具 | 所属能力 | “隐藏”特性 |
+| 工具 | 所属能力 | 核心特性 |
 | :--- | :--- | :--- |
 | `read_file` | `read` | **行切片**: 支持 `offset` 和 `limit` 参数，精准读取超大文件的特定部分。 |
 | `edit_file` | `write` | **全局替换**: 设置 `replace_all: true` 即可实现全代码库范围的精确更新。 |
 | `shell` | `exec` | **受控执行**: 通过 `/bin/sh -c` 运行，默认 120s 超时及 4MB 输出缓冲。 |
-| `search` | `read` | **自动忽略**: 内部自动过滤 `.git`、`node_modules` 和 `.starkharness`。 |
 | `spawn_agent` | `delegate` | **角色化隔离**: 创建具备特定职责和独立工具白名单的子 Agent。 |
 | `tasks` | `delegate` | **状态机管理**: 集成任务管理器（创建 ➔ 更新 ➔ 列表）。 |
 
 ---
 
-## 🚦 开发者实战指引
+## 🚦 CLI 命令参考
 
-```bash
-# 1. 初始化环境
-git clone https://github.com/wbzuo/StarkHarness.git && cd StarkHarness
+通过 `node src/main.js <command>` 执行指令。
 
-# 2. 查看系统注册表 (查看所有工具、命令、供应商及潜在的插件冲突)
-node src/main.js registry
-
-# 3. 健康检查
-node src/main.js doctor
-
-# 4. 冒烟测试 (验证端到端的 Turn Loop 链路是否通畅)
-node src/main.js smoke-test
-
-# 5. 运行测试套件 (执行 64 个工业级单元测试)
-npm test
-```
+| 命令 | 用途 |
+| :--- | :--- |
+| `registry` | **全量诊断**: 列出所有工具、命令、供应商及插件冲突。 |
+| `doctor` | **健康检查**: 验证系统连接性及各平面状态。 |
+| `smoke-test` | **快速验证**: 执行端到端的 `read_file` 循环。 |
+| `transcript` | **事件日志**: 回放完整日志，支持自定义过滤。 |
+| `replay-turn` | **确定性重放**: 从已记录的步骤生成重放骨架。 |
+| `replay-runner` | **执行计划**: 评估并执行记录步骤的重放计划。 |
+| `plugins` | **插件注册表**: 显示已加载能力及诊断警告。 |
 
 ---
 
@@ -110,7 +123,6 @@ npm test
 - [ ] **阶段 1**: 实现支持流式输出的 Anthropic/OpenAI 供应后端。
 - [ ] **阶段 2**: 完整支持 MCP (Model Context Protocol) 传输协议。
 - [ ] **阶段 3**: 开发具备语法高亮和自动补全的富交互 TUI / REPL。
-- [ ] **阶段 4**: 实现重放引擎，用于确定性调试失败的 Turn。
 
 ---
 
