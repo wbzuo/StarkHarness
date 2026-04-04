@@ -1,14 +1,8 @@
-const DEFAULT_RULES = {
-  read: 'allow',
-  write: 'ask',
-  exec: 'ask',
-  network: 'ask',
-  delegate: 'allow',
-};
+import { DEFAULT_POLICY } from './policy.js';
 
 export class PermissionEngine {
   constructor(rules = {}) {
-    this.rules = { ...DEFAULT_RULES, ...rules };
+    this.rules = { ...DEFAULT_POLICY, ...rules };
   }
 
   can(capability) {
@@ -20,5 +14,9 @@ export class PermissionEngine {
       capability,
       decision: this.can(capability),
     };
+  }
+
+  snapshot() {
+    return { ...this.rules };
   }
 }

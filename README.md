@@ -54,13 +54,13 @@ node src/main.js doctor
 - Exposes machine-readable blueprint output.
 - Persists session state plus runtime orchestration snapshots under `.starkharness/`.
 - Ships real read/write/edit/search/glob/shell tool paths behind unified permissions.
-- Supports command dispatch, provider contracts, and session resume.
+- Supports command dispatch, provider contracts, session resume, and transcript replay.
 - Verifies the dependency-free harness shape in tests.
 
 ## What comes next
 
-1. Add configurable policy files and sandbox profiles.
+1. Add sandbox profiles and per-tool rule composition on top of policy files.
 2. Extend provider adapters from stub contracts into real model backends.
 3. Add MCP/LSP/bridge integration.
-4. Add transcript replay and richer CLI/REPL dispatch.
+4. Add transcript replay controls and richer CLI/REPL argument routing.
 5. Add team/swarm execution semantics and plugin-backed capability loading.

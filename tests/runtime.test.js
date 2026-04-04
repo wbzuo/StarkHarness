@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, readFile } from 'node:fs/promises';
+import { mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
 import { createRuntime, createBlueprintDocument } from '../src/kernel/runtime.js';
@@ -25,6 +25,7 @@ test('runtime boots with full blueprint surfaces', async () => {
   assert.equal(runtime.tools.list().length, 10);
   assert.ok(blueprint.capabilities.advanced.includes('voice'));
   assert.equal(blueprint.orchestration.taskCount, 0);
+  assert.equal(blueprint.persistence.transcriptPath.endsWith('transcript.jsonl'), true);
 });
 
 test('permission engine blocks ask-gated tools by default', async () => {
@@ -36,6 +37,20 @@ test('permission engine blocks ask-gated tools by default', async () => {
 
   assert.equal(result.ok, false);
   assert.equal(result.reason, 'permission-escalation-required');
+});
+
+test('policy file can override permission defaults', async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'starkharness-policy-'));
+  const policyPath = path.join(root, 'policy.json');
+  await writeFile(policyPath, JSON.stringify({ exec: 'allow', write: 'deny' }), 'utf8');
+  const runtime = await createRuntime({
+    stateDir: path.join(root, '.starkharness'),
+    session: { cwd: root, goal: 'policy-runtime' },
+    policyPath,
+  });
+
+  assert.equal(runtime.permissions.can('exec'), 'allow');
+  assert.equal(runtime.permissions.can('write'), 'deny');
 });
 
 test('allowing read tools executes successfully', async () => {
@@ -157,4 +172,29 @@ test('command dispatch and resume hydrate persisted state', async () => {
   const resumedSession = await resumed.dispatchCommand('resume');
   assert.equal(resumedSession.id, runtime.session.id);
   assert.equal(resumedSession.turns.length, runtime.session.turns.length);
+});
+
+test('provider command returns stubbed completion output', async () => {
+  const { runtime } = await makeRuntime();
+  const completion = await runtime.dispatchCommand('complete', {
+    provider: 'openai',
+    prompt: 'draft scaffold',
+  });
+
+  assert.equal(completion.provider, 'openai');
+  assert.equal(completion.output, 'stub:openai:draft scaffold');
+});
+
+test('transcript command replays event log', async () => {
+  const { runtime } = await makeRuntime();
+  await runtime.dispatchCommand('providers');
+  await runHarnessTurn(runtime, {
+    tool: 'spawn_agent',
+    input: { role: 'tester' },
+  });
+
+  const transcript = await runtime.dispatchCommand('transcript');
+  assert.ok(transcript.some((entry) => entry.eventName === 'runtime:boot'));
+  assert.ok(transcript.some((entry) => entry.eventName === 'command:complete'));
+  assert.ok(transcript.some((entry) => entry.eventName === 'turn:complete'));
 });

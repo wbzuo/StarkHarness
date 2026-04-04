@@ -21,6 +21,12 @@ export class ProviderRegistry {
       modelFamily,
     }));
   }
+
+  async complete(id, request) {
+    const provider = this.get(id);
+    if (!provider) throw new Error(`Unknown provider: ${id}`);
+    return provider.complete(request);
+  }
 }
 
 function createProvider(id, purpose, modelFamily) {
@@ -34,6 +40,7 @@ function createProvider(id, purpose, modelFamily) {
         modelFamily,
         request,
         status: 'stubbed',
+        output: `stub:${id}:${request.prompt ?? ''}`,
       };
     },
   };

@@ -21,6 +21,8 @@ export function createCommandRegistry() {
           commands: runtime.commands.list().length,
           capabilityDomains: Object.keys(runtime.capabilities).length,
           sessionPath: runtime.state.getSessionPath(runtime.session.id),
+          policy: runtime.permissions.snapshot(),
+          transcriptPath: runtime.telemetry.transcriptPath,
         };
       },
     },
@@ -62,6 +64,23 @@ export function createCommandRegistry() {
         return runtime.agents.list();
       },
     },
+    {
+      name: 'transcript',
+      description: 'Replay the harness event log',
+      async execute(runtime) {
+        return runtime.telemetry.replay();
+      },
+    },
+    {
+      name: 'complete',
+      description: 'Execute a provider completion request',
+      async execute(runtime, args = {}) {
+        return runtime.providers.complete(args.provider ?? 'anthropic', {
+          prompt: args.prompt ?? 'hello',
+          sessionId: runtime.session.id,
+        });
+      },
+    },
   ];
 }
 
@@ -85,9 +104,9 @@ export class CommandRegistry {
     return [...this.#commands.values()].map(({ name, description }) => ({ name, description }));
   }
 
-  async dispatch(name, runtime) {
+  async dispatch(name, runtime, args = {}) {
     const command = this.get(name);
     if (!command) throw new Error(`Unknown command: ${name}`);
-    return command.execute(runtime);
+    return command.execute(runtime, args);
   }
 }

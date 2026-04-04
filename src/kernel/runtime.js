@@ -16,12 +16,14 @@ import { createBridgeBlueprint } from '../bridge/index.js';
 import { createReplBlueprint } from '../ui/repl.js';
 import { createTelemetrySink } from '../telemetry/index.js';
 import { StateStore } from '../state/store.js';
+import { loadPolicyFile } from '../permissions/policy.js';
 
 function createSnapshot(runtime) {
   return {
     session: runtime.session,
     tasks: runtime.tasks.snapshot(),
     agents: runtime.agents.snapshot(),
+    permissions: runtime.permissions.snapshot(),
   };
 }
 
@@ -34,11 +36,12 @@ export async function createRuntime(options = {}) {
     ? await state.loadSession(options.resumeSessionId)
     : null;
   const runtimeSnapshot = options.resumeSessionId
-    ? await state.loadRuntimeSnapshot().catch(() => ({ tasks: [], agents: [] }))
-    : { tasks: [], agents: [] };
+    ? await state.loadRuntimeSnapshot().catch(() => ({ tasks: [], agents: [], permissions: {} }))
+    : { tasks: [], agents: [], permissions: {} };
+  const policy = await loadPolicyFile(options.policyPath);
 
   const events = new EventBus();
-  const permissions = new PermissionEngine(options.permissions);
+  const permissions = new PermissionEngine({ ...runtimeSnapshot.permissions, ...policy, ...options.permissions });
   const tasks = new TaskStore(runtimeSnapshot.tasks ?? []);
   const agents = new AgentManager(runtimeSnapshot.agents ?? []);
   const plugins = new PluginLoader();
@@ -53,7 +56,9 @@ export async function createRuntime(options = {}) {
     tools.register(tool);
   }
 
-  const telemetry = createTelemetrySink();
+  const telemetry = createTelemetrySink({ rootDir: stateDir });
+  await telemetry.init();
+
   const session = resumed ?? createSession(options.session);
   const context = createContextEnvelope({ cwd: session.cwd, mode: session.mode });
   const commands = new CommandRegistry(createCommandRegistry());
@@ -79,16 +84,24 @@ export async function createRuntime(options = {}) {
       await this.state.saveSession(this.session);
       await this.state.saveRuntimeSnapshot(createSnapshot(this));
     },
+    async log(eventName, payload) {
+      return this.telemetry.emit(eventName, payload);
+    },
     async dispatchTurn(turn) {
+      await this.log('turn:start', turn);
       const tool = this.tools.get(turn.tool);
       if (!tool) throw new Error(`Unknown tool: ${turn.tool}`);
 
       const gate = this.permissions.evaluate({ capability: tool.capability });
       if (gate.decision === 'deny') {
-        return { ok: false, reason: 'permission-denied', tool: tool.name, gate };
+        const denied = { ok: false, reason: 'permission-denied', tool: tool.name, gate };
+        await this.log('turn:denied', denied);
+        return denied;
       }
       if (gate.decision === 'ask') {
-        return { ok: false, reason: 'permission-escalation-required', tool: tool.name, gate };
+        const gated = { ok: false, reason: 'permission-escalation-required', tool: tool.name, gate };
+        await this.log('turn:gated', gated);
+        return gated;
       }
 
       const result = await tool.execute(turn.input, this);
@@ -98,14 +111,19 @@ export async function createRuntime(options = {}) {
         recordedAt: new Date().toISOString(),
       });
       await this.persist();
+      await this.log('turn:complete', { turn, result });
       return result;
     },
-    async dispatchCommand(name) {
-      return this.commands.dispatch(name, this);
+    async dispatchCommand(name, args = {}) {
+      await this.log('command:start', { name, args });
+      const result = await this.commands.dispatch(name, this, args);
+      await this.log('command:complete', { name, args, result });
+      return result;
     },
   };
 
   await runtime.persist();
+  await runtime.log('runtime:boot', { sessionId: runtime.session.id, stateDir, resumed: Boolean(options.resumeSessionId) });
   return runtime;
 }
 
@@ -129,10 +147,12 @@ export function createBlueprintDocument(runtime) {
       taskCount: runtime.tasks.list().length,
       agentCount: runtime.agents.list().length,
     },
+    policy: runtime.permissions.snapshot(),
     persistence: {
       rootDir: runtime.state.rootDir,
       sessionPath: runtime.state.getSessionPath(runtime.session.id),
       runtimePath: runtime.state.runtimePath,
+      transcriptPath: runtime.telemetry.transcriptPath,
     },
   };
 }
