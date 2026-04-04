@@ -81,6 +81,8 @@ export async function createRuntime(options = {}) {
   // Memory and skills bind to session.cwd (correct for both new and resumed sessions)
   const memory = new MemoryManager({ projectDir: cwd });
   const skills = new SkillLoader(path.join(cwd, 'skills'));
+  // Auto-discover skills at boot
+  await skills.discoverSkills();
 
   if (options.pluginManifestPath) {
     await plugins.loadManifestFile(options.pluginManifestPath);
@@ -91,6 +93,16 @@ export async function createRuntime(options = {}) {
   const builtinToolConflicts = tools.registerPluginTools(plugins.listTools());
 
   const commands = new CommandRegistry(createCommandRegistry());
+
+  // Auto-discover filesystem commands (user-level → project-level, later overrides earlier)
+  const { discoverCommands, wrapFileCommand } = await import('../commands/loader.js');
+  const commandDirs = [
+    path.join(stateDir, 'commands'),
+    path.join(cwd, 'commands'),
+  ];
+  const fileCommands = await discoverCommands(commandDirs);
+  commands.registerMany(fileCommands.map(wrapFileCommand));
+
   const builtinCommandConflicts = commands.registerPluginCommands(plugins.listCommands());
 
   const pluginDiagnostics = diagnosePluginConflicts(plugins, { builtinToolConflicts, builtinCommandConflicts });
