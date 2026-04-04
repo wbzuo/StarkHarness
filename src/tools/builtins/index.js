@@ -14,205 +14,248 @@ function resolveWorkspacePath(runtime, targetPath = '.') {
 async function walkFiles(rootDir) {
   const entries = await readdir(rootDir, { withFileTypes: true });
   const results = [];
-
   for (const entry of entries) {
-    if (entry.name === '.git' || entry.name === 'node_modules') continue;
+    if (entry.name === '.git' || entry.name === 'node_modules' || entry.name === '.starkharness') continue;
     const fullPath = path.join(rootDir, entry.name);
-    if (entry.isDirectory()) {
-      results.push(...(await walkFiles(fullPath)));
-    } else {
-      results.push(fullPath);
-    }
+    if (entry.isDirectory()) results.push(...(await walkFiles(fullPath)));
+    else results.push(fullPath);
   }
-
   return results;
-}
-
-function createReadFileTool() {
-  return defineTool({
-    name: 'read_file',
-    capability: 'read',
-    description: 'Read workspace files',
-    async execute(input = {}, runtime) {
-      const filePath = resolveWorkspacePath(runtime, input.path);
-      const content = await readFile(filePath, 'utf8');
-      return { ok: true, tool: 'read_file', path: filePath, content };
-    },
-  });
-}
-
-function createWriteFileTool() {
-  return defineTool({
-    name: 'write_file',
-    capability: 'write',
-    description: 'Create or overwrite files',
-    async execute(input = {}, runtime) {
-      const filePath = resolveWorkspacePath(runtime, input.path);
-      await mkdir(path.dirname(filePath), { recursive: true });
-      await writeFile(filePath, input.content ?? '', 'utf8');
-      return { ok: true, tool: 'write_file', path: filePath, bytes: Buffer.byteLength(input.content ?? '', 'utf8') };
-    },
-  });
-}
-
-function createEditFileTool() {
-  return defineTool({
-    name: 'edit_file',
-    capability: 'write',
-    description: 'Perform surgical file edits',
-    async execute(input = {}, runtime) {
-      const filePath = resolveWorkspacePath(runtime, input.path);
-      const current = await readFile(filePath, 'utf8');
-      if (!current.includes(input.oldString ?? '')) {
-        return { ok: false, tool: 'edit_file', reason: 'old-string-not-found', path: filePath };
-      }
-      const next = current.replace(input.oldString, input.newString ?? '');
-      await writeFile(filePath, next, 'utf8');
-      return { ok: true, tool: 'edit_file', path: filePath };
-    },
-  });
-}
-
-function createShellTool() {
-  return defineTool({
-    name: 'shell',
-    capability: 'exec',
-    description: 'Execute shell commands',
-    async execute(input = {}, runtime) {
-      const command = input.command ?? 'pwd';
-      const { stdout, stderr } = await execFileAsync('/bin/zsh', ['-lc', command], {
-        cwd: runtime.context.cwd,
-        maxBuffer: 1024 * 1024,
-      });
-      return { ok: true, tool: 'shell', command, stdout, stderr };
-    },
-  });
-}
-
-function createSearchTool() {
-  return defineTool({
-    name: 'search',
-    capability: 'read',
-    description: 'Search workspace content',
-    async execute(input = {}, runtime) {
-      const query = String(input.query ?? '');
-      const files = await walkFiles(runtime.context.cwd);
-      const matches = [];
-      for (const filePath of files) {
-        const content = await readFile(filePath, 'utf8').catch(() => null);
-        if (!content || !query) continue;
-        const lines = content.split('\n');
-        lines.forEach((line, index) => {
-          if (line.includes(query)) {
-            matches.push({ path: filePath, line: index + 1, text: line.trim() });
-          }
-        });
-      }
-      return { ok: true, tool: 'search', query, matches };
-    },
-  });
-}
-
-function createGlobTool() {
-  return defineTool({
-    name: 'glob',
-    capability: 'read',
-    description: 'Resolve file patterns',
-    async execute(input = {}, runtime) {
-      const pattern = String(input.pattern ?? '');
-      const files = await walkFiles(runtime.context.cwd);
-      const needle = pattern.replaceAll('*', '');
-      const matches = files.filter((filePath) => filePath.includes(needle));
-      return { ok: true, tool: 'glob', pattern, matches };
-    },
-  });
-}
-
-function createFetchUrlTool() {
-  return defineTool({
-    name: 'fetch_url',
-    capability: 'network',
-    description: 'Fetch remote content',
-    async execute(input = {}) {
-      const response = await fetch(input.url);
-      const content = await response.text();
-      return {
-        ok: true,
-        tool: 'fetch_url',
-        url: input.url,
-        status: response.status,
-        content,
-      };
-    },
-  });
-}
-
-function createSpawnAgentTool() {
-  return defineTool({
-    name: 'spawn_agent',
-    capability: 'delegate',
-    description: 'Spawn a bounded child agent',
-    async execute(input = {}, runtime) {
-      const agent = runtime.agents.spawn(input);
-      await runtime.persist();
-      return { ok: true, tool: 'spawn_agent', agent };
-    },
-  });
-}
-
-function createSendMessageTool() {
-  return defineTool({
-    name: 'send_message',
-    capability: 'delegate',
-    description: 'Send messages between agents',
-    async execute(input = {}, runtime) {
-      const message = {
-        from: input.from ?? 'runtime',
-        to: input.to ?? 'agent-1',
-        body: input.body ?? '',
-        sentAt: new Date().toISOString(),
-      };
-      runtime.session.messages = [...(runtime.session.messages ?? []), message];
-      await runtime.persist();
-      return { ok: true, tool: 'send_message', message };
-    },
-  });
-}
-
-function createTasksTool() {
-  return defineTool({
-    name: 'tasks',
-    capability: 'delegate',
-    description: 'Manage task state',
-    async execute(input = {}, runtime) {
-      let task;
-      switch (input.action) {
-        case 'create':
-          task = runtime.tasks.create(input.task ?? {});
-          break;
-        case 'update':
-          task = runtime.tasks.update(input.id, input.patch ?? {});
-          break;
-        default:
-          return { ok: true, tool: 'tasks', tasks: runtime.tasks.list() };
-      }
-      await runtime.persist();
-      return { ok: true, tool: 'tasks', task, tasks: runtime.tasks.list() };
-    },
-  });
 }
 
 export function createBuiltinTools() {
   return [
-    createReadFileTool(),
-    createWriteFileTool(),
-    createEditFileTool(),
-    createShellTool(),
-    createSearchTool(),
-    createGlobTool(),
-    createFetchUrlTool(),
-    createSpawnAgentTool(),
-    createSendMessageTool(),
-    createTasksTool(),
+    defineTool({
+      name: 'read_file',
+      capability: 'read',
+      description: 'Read a file from the workspace. Returns the file content as a string.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          path: { type: 'string', description: 'Relative path to the file to read' },
+          offset: { type: 'number', description: 'Line number to start reading from (0-based)' },
+          limit: { type: 'number', description: 'Maximum number of lines to read' },
+        },
+        required: ['path'],
+      },
+      async execute(input = {}, runtime) {
+        const filePath = resolveWorkspacePath(runtime, input.path);
+        let content = await readFile(filePath, 'utf8');
+        if (input.offset !== undefined || input.limit !== undefined) {
+          const lines = content.split('\n');
+          const start = input.offset ?? 0;
+          const end = input.limit ? start + input.limit : lines.length;
+          content = lines.slice(start, end).join('\n');
+        }
+        return { ok: true, tool: 'read_file', path: filePath, content };
+      },
+    }),
+
+    defineTool({
+      name: 'write_file',
+      capability: 'write',
+      description: 'Create or overwrite a file. Creates parent directories as needed.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          path: { type: 'string', description: 'Relative path to write' },
+          content: { type: 'string', description: 'File content to write' },
+        },
+        required: ['path', 'content'],
+      },
+      async execute(input = {}, runtime) {
+        const filePath = resolveWorkspacePath(runtime, input.path);
+        await mkdir(path.dirname(filePath), { recursive: true });
+        await writeFile(filePath, input.content ?? '', 'utf8');
+        return { ok: true, tool: 'write_file', path: filePath, bytes: Buffer.byteLength(input.content ?? '', 'utf8') };
+      },
+    }),
+
+    defineTool({
+      name: 'edit_file',
+      capability: 'write',
+      description: 'Perform exact string replacement in a file. old_string must be unique in the file.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          path: { type: 'string', description: 'Relative path to the file' },
+          old_string: { type: 'string', description: 'Exact text to find and replace' },
+          new_string: { type: 'string', description: 'Replacement text' },
+          replace_all: { type: 'boolean', description: 'Replace all occurrences', default: false },
+        },
+        required: ['path', 'old_string', 'new_string'],
+      },
+      async execute(input = {}, runtime) {
+        const filePath = resolveWorkspacePath(runtime, input.path);
+        const current = await readFile(filePath, 'utf8');
+        if (!current.includes(input.old_string ?? input.oldString ?? '')) {
+          return { ok: false, tool: 'edit_file', reason: 'old-string-not-found', path: filePath };
+        }
+        const search = input.old_string ?? input.oldString;
+        const replacement = input.new_string ?? input.newString ?? '';
+        const next = input.replace_all ? current.replaceAll(search, replacement) : current.replace(search, replacement);
+        await writeFile(filePath, next, 'utf8');
+        return { ok: true, tool: 'edit_file', path: filePath };
+      },
+    }),
+
+    defineTool({
+      name: 'shell',
+      capability: 'exec',
+      description: 'Execute a shell command in the workspace directory. Returns stdout and stderr.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          command: { type: 'string', description: 'Shell command to execute' },
+          timeout: { type: 'number', description: 'Timeout in milliseconds', default: 120000 },
+        },
+        required: ['command'],
+      },
+      async execute(input = {}, runtime) {
+        const command = input.command ?? 'pwd';
+        const timeout = input.timeout ?? 120000;
+        const { stdout, stderr } = await execFileAsync('/bin/sh', ['-c', command], {
+          cwd: runtime.context.cwd,
+          maxBuffer: 4 * 1024 * 1024,
+          timeout,
+        });
+        return { ok: true, tool: 'shell', command, stdout, stderr };
+      },
+    }),
+
+    defineTool({
+      name: 'search',
+      capability: 'read',
+      description: 'Search workspace file contents for a text pattern. Returns matching file paths and lines.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          query: { type: 'string', description: 'Text pattern to search for' },
+          glob: { type: 'string', description: 'File pattern filter (e.g. "*.js")' },
+        },
+        required: ['query'],
+      },
+      async execute(input = {}, runtime) {
+        const query = String(input.query ?? '');
+        const files = await walkFiles(runtime.context.cwd);
+        const needle = input.glob?.replaceAll('*', '') ?? '';
+        const filtered = needle ? files.filter((f) => f.includes(needle)) : files;
+        const matches = [];
+        for (const filePath of filtered) {
+          const content = await readFile(filePath, 'utf8').catch(() => null);
+          if (!content || !query) continue;
+          content.split('\n').forEach((line, index) => {
+            if (line.includes(query)) matches.push({ path: filePath, line: index + 1, text: line.trim() });
+          });
+        }
+        return { ok: true, tool: 'search', query, matches };
+      },
+    }),
+
+    defineTool({
+      name: 'glob',
+      capability: 'read',
+      description: 'Find files matching a pattern in the workspace.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          pattern: { type: 'string', description: 'File pattern to match (e.g. "**/*.js")' },
+        },
+        required: ['pattern'],
+      },
+      async execute(input = {}, runtime) {
+        const pattern = String(input.pattern ?? '');
+        const files = await walkFiles(runtime.context.cwd);
+        const needle = pattern.replaceAll('*', '');
+        const matches = files.filter((f) => f.includes(needle));
+        return { ok: true, tool: 'glob', pattern, matches };
+      },
+    }),
+
+    defineTool({
+      name: 'fetch_url',
+      capability: 'network',
+      description: 'Fetch content from a URL.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          url: { type: 'string', description: 'URL to fetch' },
+        },
+        required: ['url'],
+      },
+      async execute(input = {}) {
+        const response = await fetch(input.url);
+        const content = await response.text();
+        return { ok: true, tool: 'fetch_url', url: input.url, status: response.status, content };
+      },
+    }),
+
+    defineTool({
+      name: 'spawn_agent',
+      capability: 'delegate',
+      description: 'Spawn a bounded child agent for parallel or isolated work.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          role: { type: 'string', description: 'Agent role (e.g. "code-reviewer", "explorer")' },
+          scope: { type: 'string', description: 'Scope restriction for the agent' },
+          prompt: { type: 'string', description: 'Task description for the agent' },
+          model: { type: 'string', description: 'Model override (inherit, sonnet, opus, haiku)' },
+          tools: { type: 'array', items: { type: 'string' }, description: 'Tool whitelist' },
+        },
+        required: ['role'],
+      },
+      async execute(input = {}, runtime) {
+        const agent = runtime.agents.spawn(input);
+        await runtime.persist();
+        return { ok: true, tool: 'spawn_agent', agent };
+      },
+    }),
+
+    defineTool({
+      name: 'send_message',
+      capability: 'delegate',
+      description: 'Send a message to another agent.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          from: { type: 'string', description: 'Sender agent ID' },
+          to: { type: 'string', description: 'Recipient agent ID' },
+          body: { type: 'string', description: 'Message content' },
+        },
+        required: ['to', 'body'],
+      },
+      async execute(input = {}, runtime) {
+        const message = { from: input.from ?? 'runtime', to: input.to, body: input.body ?? '', sentAt: new Date().toISOString() };
+        runtime.session.messages = [...(runtime.session.messages ?? []), message];
+        await runtime.persist();
+        return { ok: true, tool: 'send_message', message };
+      },
+    }),
+
+    defineTool({
+      name: 'tasks',
+      capability: 'delegate',
+      description: 'Create, update, or list tasks for tracking work.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          action: { type: 'string', enum: ['create', 'update', 'list'], description: 'Task action' },
+          id: { type: 'string', description: 'Task ID (for update)' },
+          task: { type: 'object', description: 'Task data (for create)' },
+          patch: { type: 'object', description: 'Fields to update (for update)' },
+        },
+      },
+      async execute(input = {}, runtime) {
+        let task;
+        switch (input.action) {
+          case 'create': task = runtime.tasks.create(input.task ?? {}); break;
+          case 'update': task = runtime.tasks.update(input.id, input.patch ?? {}); break;
+          default: return { ok: true, tool: 'tasks', tasks: runtime.tasks.list() };
+        }
+        await runtime.persist();
+        return { ok: true, tool: 'tasks', task, tasks: runtime.tasks.list() };
+      },
+    }),
   ];
 }

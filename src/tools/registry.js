@@ -3,15 +3,9 @@ function createPluginTool(tool) {
     name: tool.name,
     capability: tool.capability ?? 'delegate',
     description: tool.description ?? `Plugin tool from ${tool.plugin}`,
+    inputSchema: tool.inputSchema ?? { type: 'object', properties: {} },
     async execute(input = {}) {
-      return {
-        ok: true,
-        source: 'plugin',
-        plugin: tool.plugin,
-        tool: tool.name,
-        input,
-        output: tool.output ?? null,
-      };
+      return { ok: true, source: 'plugin', plugin: tool.plugin, tool: tool.name, input, output: tool.output ?? null };
     },
   };
 }
@@ -38,5 +32,13 @@ export class ToolRegistry {
 
   list() {
     return [...this.#tools.values()];
+  }
+
+  toSchemaList() {
+    return this.list().map(({ name, description, inputSchema }) => ({
+      name,
+      description,
+      input_schema: inputSchema,
+    }));
   }
 }
