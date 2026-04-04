@@ -1,3 +1,4 @@
+import path from 'node:path';
 import { EventBus } from './events.js';
 import { createContextEnvelope } from './context.js';
 import { createSession } from './session.js';
@@ -14,8 +15,9 @@ import { createWorkspaceBlueprint } from '../workspace/index.js';
 import { createBridgeBlueprint } from '../bridge/index.js';
 import { createReplBlueprint } from '../ui/repl.js';
 import { createTelemetrySink } from '../telemetry/index.js';
+import { StateStore } from '../state/store.js';
 
-export function createRuntime(options = {}) {
+export async function createRuntime(options = {}) {
   const events = new EventBus();
   const permissions = new PermissionEngine(options.permissions);
   const tasks = new TaskStore();
@@ -35,8 +37,13 @@ export function createRuntime(options = {}) {
   const telemetry = createTelemetrySink();
   const session = createSession(options.session);
   const context = createContextEnvelope({ cwd: session.cwd, mode: session.mode });
+  const state = new StateStore({
+    rootDir: options.stateDir ?? path.join(context.cwd, '.starkharness'),
+  });
 
-  return {
+  await state.init();
+
+  const runtime = {
     session,
     context,
     events,
@@ -47,6 +54,7 @@ export function createRuntime(options = {}) {
     providers,
     tools,
     telemetry,
+    state,
     commands: createCommandRegistry(),
     capabilities: createCapabilityMap(),
     workspace: createWorkspaceBlueprint(),
@@ -55,6 +63,7 @@ export function createRuntime(options = {}) {
     async dispatchTurn(turn) {
       const tool = this.tools.get(turn.tool);
       if (!tool) throw new Error(`Unknown tool: ${turn.tool}`);
+
       const gate = this.permissions.evaluate({ capability: tool.capability });
       if (gate.decision === 'deny') {
         return { ok: false, reason: 'permission-denied', tool: tool.name, gate };
@@ -62,11 +71,20 @@ export function createRuntime(options = {}) {
       if (gate.decision === 'ask') {
         return { ok: false, reason: 'permission-escalation-required', tool: tool.name, gate };
       }
+
       const result = await tool.execute(turn.input, this);
-      this.session.turns.push({ turn, result });
+      this.session.turns.push({
+        turn,
+        result,
+        recordedAt: new Date().toISOString(),
+      });
+      await this.state.saveSession(this.session);
       return result;
     },
   };
+
+  await runtime.state.saveSession(runtime.session);
+  return runtime;
 }
 
 export function createBlueprintDocument(runtime) {
@@ -76,10 +94,18 @@ export function createBlueprintDocument(runtime) {
     kernel: ['session', 'runtime', 'loop', 'context', 'events'],
     commands: runtime.commands,
     providers: runtime.providers.list(),
-    tools: runtime.tools.list().map(({ name, capability, description }) => ({ name, capability, description })),
+    tools: runtime.tools.list().map(({ name, capability, description }) => ({
+      name,
+      capability,
+      description,
+    })),
     capabilities: runtime.capabilities,
     workspace: runtime.workspace,
     bridge: runtime.bridge,
     ui: runtime.ui,
+    persistence: {
+      rootDir: runtime.state.rootDir,
+      sessionPath: runtime.state.getSessionPath(runtime.session.id),
+    },
   };
 }

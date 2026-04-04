@@ -52,6 +52,8 @@ node src/main.js doctor
 - Boots a working runtime.
 - Registers core tools/capabilities.
 - Exposes machine-readable blueprint output.
+- Persists session state under `.starkharness/sessions/`.
+- Ships real read/write/edit/search/glob/shell tool paths behind unified permissions.
 - Verifies the dependency-free harness shape in tests.
 
 ## What comes next

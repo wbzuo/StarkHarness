@@ -4,7 +4,7 @@ import { runHarnessTurn } from './kernel/loop.js';
 
 async function main(argv = process.argv.slice(2)) {
   const command = argv[0] ?? 'blueprint';
-  const runtime = createRuntime({
+  const runtime = await createRuntime({
     session: { goal: 'bootstrap StarkHarness', mode: 'interactive' },
   });
 
@@ -20,6 +20,7 @@ async function main(argv = process.argv.slice(2)) {
         tools: runtime.tools.list().length,
         commands: runtime.commands.length,
         capabilityDomains: Object.keys(runtime.capabilities).length,
+        sessionPath: runtime.state.getSessionPath(runtime.session.id),
       };
       console.log(JSON.stringify(report, null, 2));
       return;
@@ -27,7 +28,7 @@ async function main(argv = process.argv.slice(2)) {
     case 'run': {
       const result = await runHarnessTurn(runtime, {
         tool: 'read_file',
-        input: { path: 'README.md' },
+        input: { path: `.starkharness/sessions/${runtime.session.id}.json` },
       });
       console.log(JSON.stringify(result, null, 2));
       return;
