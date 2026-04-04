@@ -5,7 +5,7 @@ export function matchAndBind(query, skillsMap) {
     const descWords = (skill.description ?? '').toLowerCase().split(/\s+/);
     const queryWords = lower.split(/\s+/);
     const overlap = queryWords.filter((w) => descWords.includes(w) && w.length > 3).length;
-    if (overlap >= 1) {
+    if (overlap >= 2) {
       return {
         name: skill.name,
         body: skill.body ?? '',

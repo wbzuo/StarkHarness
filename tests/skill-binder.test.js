@@ -22,7 +22,7 @@ test('matchAndBind enriches system prompt with skill body', () => {
   const skills = new Map([
     ['refactor', { name: 'refactor', description: 'refactor code following DRY YAGNI', body: 'Refactor guidelines' }],
   ]);
-  const result = matchAndBind('refactor the auth module', skills);
+  const result = matchAndBind('refactor this code following YAGNI', skills);
   assert.ok(result);
   assert.ok(result.promptAddendum.includes('Refactor guidelines'));
 });
