@@ -160,7 +160,7 @@ export async function createRuntime(options = {}) {
     provider: {
       async complete({ systemPrompt, messages, tools }) {
         return providers.completeWithStrategy({
-          capability: tools?.length ? 'tools' : 'chat',
+          capability: 'chat',
           request: { systemPrompt, messages, tools },
           retryOptions: { maxRetries: 2, baseDelay: 50, timeout: 120000 },
         });
@@ -223,7 +223,18 @@ export async function createRuntime(options = {}) {
       await this.log('run:start', { userMessage });
       const discovered = this.skills.listDiscovered();
       const skillMap = new Map(discovered.map((skill) => [skill.dir, skill]));
-      const binding = matchAndBind(userMessage, skillMap);
+      const match = matchAndBind(userMessage, skillMap);
+      let binding = match;
+      if (match) {
+        const full = await this.skills.loadSkill(match.dir).catch(() => null);
+        if (full) {
+          binding = {
+            name: full.name,
+            body: full.body,
+            promptAddendum: `\n\n# Active Skill: ${full.name}\n\n${full.body}`,
+          };
+        }
+      }
       const effectiveSystemPrompt = binding
         ? `${this.context.systemPrompt}${binding.promptAddendum}`
         : this.context.systemPrompt;
