@@ -1,3 +1,5 @@
+// maxTurns limits total tool executions, not API round-trips.
+// A single response with N tool_use blocks counts as N turns.
 const DEFAULT_MAX_TURNS = 25;
 
 export class AgentRunner {

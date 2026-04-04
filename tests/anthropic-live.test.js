@@ -5,6 +5,7 @@ import {
   formatTools,
   parseContentBlocks,
   buildRequestBody,
+  callMessagesAPI,
 } from '../src/providers/anthropic-live.js';
 
 test('formatMessages converts context messages to Anthropic format', () => {
@@ -103,4 +104,8 @@ test('buildRequestBody assembles a valid API request', () => {
   assert.equal(body.messages.length, 1);
   assert.equal(body.tools.length, 1);
   assert.equal(body.max_tokens, 4096);
+});
+
+test('callMessagesAPI throws without API key', async () => {
+  await assert.rejects(() => callMessagesAPI({}), /ANTHROPIC_API_KEY is required/);
 });

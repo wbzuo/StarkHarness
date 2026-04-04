@@ -171,3 +171,25 @@ test('AgentRunner fires Stop hook before finishing', async () => {
 
   assert.equal(stopFired, true);
 });
+
+test('AgentRunner returns unknown-tool for unregistered tools', async () => {
+  const provider = makeMockProvider([
+    {
+      text: '',
+      toolCalls: [{ id: 'tu_1', name: 'nonexistent', input: {} }],
+      stopReason: 'tool_use',
+      usage: {},
+    },
+    { text: 'Tool not found.', toolCalls: [], stopReason: 'end_turn', usage: {} },
+  ]);
+  const hooks = new HookDispatcher();
+  const tools = new ToolRegistry();
+  const permissions = new PermissionEngine({ read: 'allow' });
+
+  const runner = new AgentRunner({ provider, hooks, tools, permissions });
+  const result = await runner.run({ userMessage: 'Use magic', systemPrompt: 'test' });
+
+  assert.equal(result.turns.length, 1);
+  assert.equal(result.turns[0].result.ok, false);
+  assert.equal(result.turns[0].result.reason, 'unknown-tool');
+});
