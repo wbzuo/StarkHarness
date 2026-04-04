@@ -69,10 +69,10 @@ export class AgentRunner {
       }
     }
 
-    // Fire Stop hook
-    await this.hooks.fire('Stop', { reason: stopReason, turns: turns.length });
+    // Fire Stop hook — deny means a hook wants to prevent stopping
+    const stopResult = await this.hooks.fire('Stop', { reason: stopReason, turns: turns.length });
 
-    return { finalText, turns, messages, stopReason, usage: totalUsage };
+    return { finalText, turns, messages, stopReason, stopHook: stopResult.decision, usage: totalUsage };
   }
 
   async #executeTool(toolCall) {

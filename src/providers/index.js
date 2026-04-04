@@ -43,10 +43,10 @@ export class ProviderRegistry {
   }
 }
 
-export function createProviderBlueprint() {
+export function createProviderBlueprint(config = {}) {
   return [
-    createAnthropicProvider(),
-    createOpenAIProvider(),
-    createCompatibleProvider(),
+    createAnthropicProvider(config.anthropic ?? {}),
+    createOpenAIProvider(config.openai ?? {}),
+    createCompatibleProvider(config.compatible ?? {}),
   ];
 }

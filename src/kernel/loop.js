@@ -44,7 +44,7 @@ export class AgentLoop {
 
   async requestStop(reason) {
     const result = await this.hooks.fire('Stop', { reason });
-    return result.decision !== 'block';
+    return result.decision !== 'deny';
   }
 
   setRuntime(runtime) {

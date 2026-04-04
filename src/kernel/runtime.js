@@ -63,7 +63,7 @@ export async function createRuntime(options = {}) {
   const tools = new ToolRegistry();
   const promptBuilder = new SystemPromptBuilder();
 
-  for (const provider of createProviderBlueprint()) {
+  for (const provider of createProviderBlueprint(providerConfig)) {
     providers.register(provider);
   }
   for (const tool of createBuiltinTools()) {
@@ -179,10 +179,26 @@ export async function createRuntime(options = {}) {
       return result;
     },
     async run(userMessage) {
-      return this.runner.run({
+      await this.log('run:start', { userMessage });
+      const result = await this.runner.run({
         userMessage,
         systemPrompt: this.context.systemPrompt,
       });
+      // Persist each tool turn back into the session
+      for (const turn of result.turns) {
+        this.session.turns.push({
+          turn: { tool: turn.toolName, input: turn.input },
+          result: turn.result,
+          recordedAt: new Date().toISOString(),
+        });
+      }
+      await this.persist();
+      await this.log('run:complete', {
+        turns: result.turns.length,
+        stopReason: result.stopReason,
+        usage: result.usage,
+      });
+      return result;
     },
   };
 

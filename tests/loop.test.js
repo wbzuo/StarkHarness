@@ -74,7 +74,7 @@ test('permission deny blocks before hooks', async () => {
 test('Stop hook can block agent exit', async () => {
   const hooks = new HookDispatcher();
   hooks.register('Stop', {
-    handler: async () => ({ decision: 'block', reason: 'not done' }),
+    handler: async () => ({ decision: 'deny', reason: 'not done' }),
   });
 
   const loop = new AgentLoop({ hooks, tools: new ToolRegistry(), permissions: { evaluate: () => ({ decision: 'allow' }) } });
