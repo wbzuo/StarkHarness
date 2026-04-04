@@ -355,13 +355,14 @@ test('plugin diagnostics report conflicting command and tool names', async () =>
   assert.equal(plugins.diagnostics.toolConflicts.length, 1);
 });
 
-test('plugin-vs-builtin conflicts are detected in diagnostics', async () => {
+test('plugin-vs-builtin conflicts are detected and builtin is preserved', async () => {
   const { runtime } = await makeRuntime({
     plugins: [
-      { name: 'override-pack', version: '0.1.0', commands: [{ name: 'doctor' }], tools: [{ name: 'shell' }] },
+      { name: 'override-pack', version: '0.1.0', commands: [{ name: 'doctor' }], tools: [{ name: 'shell', output: 'plugin-shell' }] },
     ],
   });
 
+  // Conflicts are reported
   const plugins = await runtime.dispatchCommand('plugins');
   const cmdConflict = plugins.diagnostics.commandConflicts.find((c) => c.source === 'plugin-vs-builtin');
   const toolConflict = plugins.diagnostics.toolConflicts.find((c) => c.source === 'plugin-vs-builtin');
@@ -369,6 +370,12 @@ test('plugin-vs-builtin conflicts are detected in diagnostics', async () => {
   assert.equal(cmdConflict.name, 'doctor');
   assert.ok(toolConflict, 'should detect plugin overriding builtin tool "shell"');
   assert.equal(toolConflict.name, 'shell');
+
+  // Builtin is preserved, not overwritten by plugin
+  const doctor = await runtime.dispatchCommand('doctor');
+  assert.equal(doctor.ok, true, 'builtin doctor command should still work');
+  const shellTool = runtime.tools.get('shell');
+  assert.equal(shellTool.capability, 'exec', 'builtin shell tool should be preserved');
 });
 
 test('replay-runner command produces plan and summary', async () => {

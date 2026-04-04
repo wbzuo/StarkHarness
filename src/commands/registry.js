@@ -68,8 +68,8 @@ export function createCommandRegistry() {
       },
     },
     {
-      name: 'run',
-      description: 'Execute a sample harness turn',
+      name: 'smoke-test',
+      description: 'Execute a read_file turn to verify harness wiring end-to-end',
       async execute(runtime) {
         return runHarnessTurn(runtime, {
           tool: 'read_file',
@@ -228,7 +228,9 @@ export class CommandRegistry {
         conflicts.push({ type: 'command', name: pc.name, source: 'plugin-vs-builtin' });
       }
     }
-    this.registerMany(pluginCommands.map(createPluginCommand));
+    const conflictNames = new Set(conflicts.map((c) => c.name));
+    const safe = pluginCommands.filter((pc) => !conflictNames.has(pc.name));
+    this.registerMany(safe.map(createPluginCommand));
     return conflicts;
   }
 

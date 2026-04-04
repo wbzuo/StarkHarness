@@ -29,7 +29,9 @@ export class ToolRegistry {
         conflicts.push({ type: 'tool', name: pt.name, source: 'plugin-vs-builtin' });
       }
     }
-    this.registerMany(pluginTools.map(createPluginTool));
+    const conflictNames = new Set(conflicts.map((c) => c.name));
+    const safe = pluginTools.filter((pt) => !conflictNames.has(pt.name));
+    this.registerMany(safe.map(createPluginTool));
     return conflicts;
   }
 

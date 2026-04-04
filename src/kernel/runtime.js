@@ -33,7 +33,6 @@ function createSnapshot(runtime) {
     agents: runtime.agents.snapshot(),
     permissions: runtime.permissions.snapshot(),
     plugins: runtime.plugins.snapshot(),
-    hooks: runtime.hooks.snapshot(),
   };
 }
 
