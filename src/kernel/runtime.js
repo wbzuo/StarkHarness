@@ -72,6 +72,8 @@ export async function createRuntime(options = {}) {
     plugins.register(plugin);
   }
 
+  tools.registerPluginTools(plugins.listTools());
+
   const commands = new CommandRegistry(createCommandRegistry());
   commands.registerPluginCommands(plugins.listCommands());
 
@@ -160,12 +162,14 @@ export function createBlueprintDocument(runtime) {
       agentCount: runtime.agents.list().length,
       pluginCount: runtime.plugins.list().length,
       commandCount: runtime.commands.list().length,
+      toolCount: runtime.tools.list().length,
     },
     policy: runtime.permissions.snapshot(),
     plugins: {
       count: runtime.plugins.list().length,
       capabilities: runtime.plugins.listCapabilities(),
       commands: runtime.plugins.listCommands(),
+      tools: runtime.plugins.listTools(),
     },
     persistence: {
       rootDir: runtime.state.rootDir,

@@ -27,6 +27,7 @@ test('runtime boots with full blueprint surfaces', async () => {
   assert.equal(blueprint.orchestration.taskCount, 0);
   assert.equal(blueprint.plugins.count, 0);
   assert.equal(blueprint.orchestration.commandCount >= 11, true);
+  assert.equal(blueprint.orchestration.toolCount >= 10, true);
   assert.equal(blueprint.persistence.transcriptPath.endsWith('transcript.jsonl'), true);
 });
 
@@ -283,4 +284,45 @@ test('playback command summarizes transcript events', async () => {
   const playback = await runtime.dispatchCommand('playback', { event: 'command:complete' });
   assert.ok(playback.totalEvents >= 1);
   assert.ok(playback.eventNames.includes('command:complete'));
+});
+
+test('plugin tools are injected into the tool registry', async () => {
+  const { runtime } = await makeRuntime({
+    plugins: [
+      {
+        name: 'tool-pack',
+        version: '0.1.0',
+        tools: [{ name: 'plugin_tool', capability: 'delegate', output: 'tool-output' }],
+      },
+    ],
+  });
+
+  const result = await runHarnessTurn(runtime, { tool: 'plugin_tool', input: { sample: true } });
+  assert.equal(result.source, 'plugin');
+  assert.equal(result.output, 'tool-output');
+});
+
+test('provider responses expose typed envelope fields', async () => {
+  const { runtime } = await makeRuntime();
+  const response = await runtime.dispatchCommand('complete', { provider: 'anthropic', prompt: 'typed' });
+  assert.equal(typeof response.request.createdAt, 'string');
+  assert.equal(typeof response.completedAt, 'string');
+  assert.equal(response.request.metadata.source, 'command');
+});
+
+test('session-summary reports current runtime state', async () => {
+  const { runtime } = await makeRuntime();
+  await runHarnessTurn(runtime, { tool: 'spawn_agent', input: { role: 'summarizer' } });
+  await runHarnessTurn(runtime, { tool: 'tasks', input: { action: 'create', task: { subject: 'Summarize' } } });
+  const summary = await runtime.dispatchCommand('session-summary');
+  assert.equal(summary.agents, 1);
+  assert.equal(summary.tasks, 1);
+});
+
+test('replay-turn command emits deterministic replay skeleton', async () => {
+  const { runtime } = await makeRuntime();
+  await runHarnessTurn(runtime, { tool: 'spawn_agent', input: { role: 'replay' } });
+  const replay = await runtime.dispatchCommand('replay-turn');
+  assert.equal(replay.length, 1);
+  assert.equal(replay[0].tool, 'spawn_agent');
 });

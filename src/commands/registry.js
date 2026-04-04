@@ -26,6 +26,19 @@ function createPluginCommand(command) {
   };
 }
 
+function createSessionSummary(runtime) {
+  return {
+    id: runtime.session.id,
+    goal: runtime.session.goal,
+    mode: runtime.session.mode,
+    cwd: runtime.session.cwd,
+    turns: runtime.session.turns.length,
+    tasks: runtime.tasks.list().length,
+    agents: runtime.agents.list().length,
+    messages: (runtime.session.messages ?? []).length,
+  };
+}
+
 export function createCommandRegistry() {
   return [
     {
@@ -71,6 +84,13 @@ export function createCommandRegistry() {
       },
     },
     {
+      name: 'session-summary',
+      description: 'Summarize the current resumed session',
+      async execute(runtime) {
+        return createSessionSummary(runtime);
+      },
+    },
+    {
       name: 'sessions',
       description: 'List persisted sessions',
       async execute(runtime) {
@@ -106,6 +126,7 @@ export function createCommandRegistry() {
           plugins: runtime.plugins.list(),
           capabilities: runtime.plugins.listCapabilities(),
           commands: runtime.plugins.listCommands(),
+          tools: runtime.plugins.listTools(),
         };
       },
     },
@@ -136,12 +157,28 @@ export function createCommandRegistry() {
       },
     },
     {
+      name: 'replay-turn',
+      description: 'Produce a deterministic replay skeleton for recorded turns',
+      async execute(runtime) {
+        return runtime.session.turns.map(({ turn, result }, index) => ({
+          step: index + 1,
+          tool: turn.tool,
+          input: turn.input,
+          resultSummary: result.ok === false ? result.reason : result.tool ?? result.output ?? 'ok',
+        }));
+      },
+    },
+    {
       name: 'complete',
       description: 'Execute a provider completion request',
       async execute(runtime, args = {}) {
         return runtime.providers.complete(args.provider ?? 'anthropic', {
           prompt: args.prompt ?? 'hello',
           sessionId: runtime.session.id,
+          metadata: {
+            source: 'command',
+          },
+          createdAt: new Date().toISOString(),
         });
       },
     },

@@ -12,6 +12,9 @@ export function validatePluginManifest(manifest) {
   if (manifest.commands && !Array.isArray(manifest.commands)) {
     throw new Error('Plugin commands must be an array');
   }
+  if (manifest.tools && !Array.isArray(manifest.tools)) {
+    throw new Error('Plugin tools must be an array');
+  }
   return true;
 }
 
@@ -27,9 +30,11 @@ export class PluginLoader {
     const normalized = {
       capabilities: [],
       commands: [],
+      tools: [],
       ...manifest,
       capabilities: [...(manifest.capabilities ?? [])],
       commands: [...(manifest.commands ?? [])],
+      tools: [...(manifest.tools ?? [])],
     };
     this.#plugins.push(normalized);
     return normalized;
@@ -58,6 +63,15 @@ export class PluginLoader {
       plugin.commands.map((command) => ({
         plugin: plugin.name,
         ...command,
+      })),
+    );
+  }
+
+  listTools() {
+    return this.#plugins.flatMap((plugin) =>
+      plugin.tools.map((tool) => ({
+        plugin: plugin.name,
+        ...tool,
       })),
     );
   }
