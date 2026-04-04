@@ -189,6 +189,20 @@ export function createCommandRegistry() {
       },
     },
     {
+      name: 'run',
+      description: 'Execute a full agent turn loop with the given prompt',
+      async execute(runtime, args = {}) {
+        const prompt = args.prompt ?? 'What files are in this project?';
+        const result = await runtime.run(prompt);
+        return {
+          finalText: result.finalText,
+          turns: result.turns.length,
+          stopReason: result.stopReason,
+          usage: result.usage,
+        };
+      },
+    },
+    {
       name: 'complete',
       description: 'Execute a provider completion request',
       async execute(runtime, args = {}) {
