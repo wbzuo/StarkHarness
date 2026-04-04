@@ -1,573 +1,327 @@
-# StarkHarness 中文说明
+# StarkHarness
 
-## 项目简介
+一个原子级、零依赖的 Agent Harness 脚手架，用于构建 Claude Code 级别的编码运行时。通过逆向工程 Claude Code 的内部架构——Hook 生命周期、JSON Schema 工具定义、系统提示词组装、Agent Turn Loop、Memory 栈、Skill 加载——然后将每个机制重新实现为干净、可测试的模块。
 
-**StarkHarness** 是一个从零构建的、面向 **Claude Code / Codex / agentic coding runtime** 这一类系统的运行时内核脚手架。
+功能对标 Claude Code 是产品目标。内核大小被极限压缩。
 
-它的核心目标不是做一个花哨的产品壳，而是先把这些系统真正关键的部分拆干净、做扎实：
-
-- 会话管理
-- 工具注册与调度
-- 权限控制
-- 状态持久化
-- 插件扩展
-- Provider 抽象
-- 事件日志与回放
-- 多代理/任务编排骨架
-
-一句话概括：
-
-> **StarkHarness = 一个极简内核、强约束、可回放、可扩展的编码 Agent Harness。**
-
----
-
-## 设计目标
-
-StarkHarness 的设计不是简单“模仿 Claude Code 的界面”，而是抽取其底层运行时模式，并在架构上做得更清晰。
-
-### 设计原则
-
-1. **功能目标对标 Claude Code 级系统**
-2. **内核极小化，外围能力模块化**
-3. **所有能力通过显式注册进入 runtime**
-4. **权限、状态、工具、插件必须可审计**
-5. **运行日志可回放、可过滤、可总结**
-6. **避免把 Provider/UI/Telemetry 耦合进核心内核**
-
----
-
-## 当前实现状态
-
-截至当前版本，StarkHarness 已经从“空壳脚手架”推进到了一个可运行、可测试、可扩展的 Harness 原型。
-
-### 已实现能力
-
-#### 1. Kernel 核心层
-位于：`src/kernel/`
-
-- `session.js`：会话对象模型
-- `runtime.js`：运行时组装中心
-- `loop.js`：turn 执行入口
-- `context.js`：上下文 envelope
-- `events.js`：基础 EventBus
-
-#### 2. Tool 系统
-位于：`src/tools/`
-
-已内建工具：
-
-- `read_file`
-- `write_file`
-- `edit_file`
-- `shell`
-- `search`
-- `glob`
-- `fetch_url`
-- `spawn_agent`
-- `send_message`
-- `tasks`
-
-支持：
-- 工具注册
-- 工具级权限判定
-- 插件工具注入
-
-#### 3. 权限系统
-位于：`src/permissions/`
-
-支持五大能力域：
-
-- `read`
-- `write`
-- `exec`
-- `network`
-- `delegate`
-
-权限值：
-- `allow`
-- `ask`
-- `deny`
-
-还支持：
-- policy 文件加载
-- tool-scoped 覆盖
-- sandbox profiles
-
-内置 profile：
-- `permissive`
-- `safe`
-- `locked`
-
-#### 4. 状态持久化
-位于：`src/state/store.js`
-
-持久化位置：`.starkharness/`
-
-包括：
-- `sessions/<id>.json`
-- `runtime.json`
-- `transcript.jsonl`
-
-支持：
-- session 保存/恢复
-- runtime snapshot 保存/恢复
-- session 列表
-
-#### 5. Provider 抽象
-位于：`src/providers/`
-
-目前已拆分为独立模块：
-- `anthropic.js`
-- `openai.js`
-- `compatible.js`
-- `base.js`
-- `config.js`
-
-已实现：
-- Provider 注册中心
-- Provider request/response envelope
-- Provider config 文件加载
-- `complete()` 调用路径
-
-当前仍为 stub provider，但接口已经稳定。
-
-#### 6. Plugin 系统
-位于：`src/plugins/`
-
-支持 plugin manifest：
-- `capabilities`
-- `commands`
-- `tools`
-
-支持：
-- manifest 校验
-- manifest 文件加载
-- capability 列表
-- plugin command 注入
-- plugin tool 注入
-- command/tool 命名冲突诊断
-
-#### 7. Command 系统
-位于：`src/commands/registry.js`
-
-当前已经支持多种 runtime 命令，包括：
-
-- `blueprint`
-- `doctor`
-- `run`
-- `resume`
-- `session-summary`
-- `sessions`
-- `providers`
-- `provider-config`
-- `tasks`
-- `agents`
-- `plugins`
-- `profiles`
-- `transcript`
-- `playback`
-- `replay-turn`
-- `replay-runner`
-- `complete`
-
-#### 8. Transcript / Replay 能力
-位于：`src/telemetry/` 与 `src/replay/`
-
-支持：
-- 事件日志追加写入（JSONL）
-- transcript replay
-- transcript 过滤
-- transcript summary
-- replay turn skeleton
-- replay runner plan
-
-#### 9. 编排骨架
-位于：
-- `src/agents/manager.js`
-- `src/tasks/store.js`
-
-当前支持：
-- 代理记录与持久化
-- 任务记录与持久化
-- send_message 会话消息记录
-- 运行时 resume 后恢复 agent/task 状态
-
----
-
-## 当前目录结构
-
-```text
-StarkHarness/
-├── README.md
-├── README-zh.md
-├── package.json
-├── src/
-│   ├── main.js
-│   ├── kernel/
-│   │   ├── session.js
-│   │   ├── runtime.js
-│   │   ├── loop.js
-│   │   ├── context.js
-│   │   └── events.js
-│   ├── permissions/
-│   │   ├── engine.js
-│   │   ├── policy.js
-│   │   └── profiles.js
-│   ├── providers/
-│   │   ├── base.js
-│   │   ├── anthropic.js
-│   │   ├── openai.js
-│   │   ├── compatible.js
-│   │   ├── config.js
-│   │   └── index.js
-│   ├── tools/
-│   │   ├── types.js
-│   │   ├── registry.js
-│   │   └── builtins/
-│   ├── plugins/
-│   │   ├── loader.js
-│   │   └── diagnostics.js
-│   ├── replay/
-│   │   └── runner.js
-│   ├── tasks/
-│   │   └── store.js
-│   ├── agents/
-│   │   └── manager.js
-│   ├── state/
-│   │   └── store.js
-│   ├── telemetry/
-│   │   └── index.js
-│   ├── commands/
-│   │   └── registry.js
-│   ├── capabilities/
-│   │   └── index.js
-│   ├── bridge/
-│   │   └── index.js
-│   ├── workspace/
-│   │   └── index.js
-│   └── ui/
-│       └── repl.js
-└── tests/
-    └── runtime.test.js
-```
-
----
-
-## 如何运行
-
-### 环境要求
-
-- Node.js >= 20
-
-### 安装
-
-当前无外部依赖，因此无需 `npm install`。
-
-### 运行基础命令
+## 快速开始
 
 ```bash
-node src/main.js blueprint
-node src/main.js doctor
-node src/main.js providers
-node src/main.js sessions
+git clone git@github.com:wbzuo/StarkHarness.git
+cd StarkHarness
+npm test                    # 64 个测试，零依赖
+node src/main.js blueprint  # 输出完整运行时蓝图
+node src/main.js doctor     # 验证 Harness 连线
 ```
 
-### 运行测试
+要求 **Node.js 20+**。无需 `npm install`——整个 Harness 仅使用 Node 内置模块。
 
-```bash
-npm test
+## 架构
+
+```
+┌─────────────────────────────────────────────────────────┐
+│ 内核 (Kernel)                                           │
+│  session → runtime → loop → context → events → hooks    │
+│                                          ↓              │
+│                                    prompt builder       │
+├─────────────────────────────────────────────────────────┤
+│ 控制面 (Control Planes)                                  │
+│  permissions/engine  tasks/store  agents/manager        │
+│  plugins/loader      plugins/diagnostics                │
+├─────────────────────────────────────────────────────────┤
+│ 工具层 (JSON Schema)                                     │
+│  read_file  write_file  edit_file  shell  search        │
+│  glob  fetch_url  spawn_agent  send_message  tasks      │
+├─────────────────────────────────────────────────────────┤
+│ 智能层 (Intelligence)                                    │
+│  memory (CLAUDE.md + 自动记忆)                            │
+│  skills (三级渐进式加载)                                   │
+│  commands (YAML frontmatter + Markdown 正文)              │
+├─────────────────────────────────────────────────────────┤
+│ Provider 层                                              │
+│  anthropic  openai  compatible (可插拔)                    │
+└─────────────────────────────────────────────────────────┘
 ```
 
----
+## 核心机制
 
-## 常用命令示例
+### Hook 系统 — `src/kernel/hooks.js`
 
-### 1. 查看蓝图
-```bash
-node src/main.js blueprint
-```
+9 个生命周期事件，对标 Claude Code 的 Hook 架构。每一次工具调用、会话事件和停止决策都经过 Hook 管道。
 
-### 2. 查看运行时诊断
-```bash
-node src/main.js doctor
-```
+```javascript
+const hooks = new HookDispatcher();
 
-### 3. 查看可用沙箱 profile
-```bash
-node src/main.js profiles
-```
-
-### 4. 使用 policy 文件
-```bash
-node src/main.js doctor --policy=/path/to/policy.json
-```
-
-示例 policy：
-
-```json
-{
-  "exec": "allow",
-  "write": "deny",
-  "tools": {
-    "shell": "deny"
-  }
-}
-```
-
-### 5. 查看 provider 配置摘要
-```bash
-node src/main.js provider-config --providers=/path/to/providers.json
-```
-
-示例 providers 配置：
-
-```json
-{
-  "openai": {
-    "model": "gpt-5",
-    "baseUrl": "https://example.com"
+// 拦截危险命令
+hooks.register('PreToolUse', {
+  matcher: 'shell',
+  handler: async (ctx) => {
+    if (ctx.toolInput.command.includes('rm -rf'))
+      return { decision: 'deny', reason: '危险命令已拦截' };
+    return { decision: 'allow' };
   },
-  "anthropic": {
-    "model": "claude-3-7-sonnet-latest"
-  }
-}
+});
+
+// 会话启动时注入上下文
+hooks.register('SessionStart', {
+  handler: async () => ({
+    additionalContext: '本项目使用 TDD，始终先写测试。',
+  }),
+});
 ```
 
-### 6. 触发 provider completion
-```bash
-node src/main.js complete --provider=openai --prompt="draft harness"
+**事件列表：** `PreToolUse` · `PostToolUse` · `Stop` · `SubagentStop` · `UserPromptSubmit` · `SessionStart` · `SessionEnd` · `PreCompact` · `Notification`
+
+**匹配器：** 精确名称 (`shell`)、管道分隔 (`read_file|write_file`)、通配符 (`*`)、正则 (`mcp_.*`)
+
+### JSON Schema 工具定义 — `src/tools/`
+
+每个工具携带完整的 JSON Schema 定义，让 LLM 精确知道需要传递哪些参数——匹配 Anthropic 的 `tool_use` 格式。
+
+```javascript
+defineTool({
+  name: 'read_file',
+  capability: 'read',
+  description: '从工作区读取文件',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      path: { type: 'string', description: '文件相对路径' },
+      offset: { type: 'number', description: '起始行号（0-based）' },
+      limit: { type: 'number', description: '最大读取行数' },
+    },
+    required: ['path'],
+  },
+  async execute(input, runtime) { /* ... */ },
+});
 ```
 
-### 7. 查看 transcript
-```bash
-node src/main.js transcript
-node src/main.js transcript --event=command:complete
-node src/main.js transcript --query=provider --limit=5
+`registry.toSchemaList()` 生成 LLM 可直接消费的工具列表，用于提示词注入。
+
+### Agent Turn Loop — `src/kernel/loop.js`
+
+完整的 Hook 门控执行管线：
+
+```
+权限检查 → PreToolUse Hook → 工具执行 → PostToolUse Hook → 记录 Turn
+   ↓              ↓                              ↓
+ deny/ask     deny → 中止                   注入 systemMessage
 ```
 
-### 8. 查看 playback 摘要
-```bash
-node src/main.js playback
+```javascript
+const loop = new AgentLoop({ hooks, tools, permissions });
+const result = await loop.executeTurn({
+  tool: 'edit_file',
+  input: { path: 'src/app.js', old_string: 'foo', new_string: 'bar' },
+});
+// result.ok === true | false（附带 reason）
 ```
 
-### 9. 查看 replay 计划
-```bash
-node src/main.js replay-runner
-node src/main.js replay-turn
+`loop.requestStop(reason)` 触发 `Stop` Hook——Hook 可以阻止退出（例如"测试未通过"）。
+
+### 系统提示词构建器 — `src/kernel/prompt.js`
+
+从多个来源组装系统提示词，与 Claude Code 完全一致：
+
+```
+身份 → 环境 → CLAUDE.md → Memory → Hook 上下文 → 工具 Schema → 规则
 ```
 
-### 10. 使用插件 manifest
-```bash
-node src/main.js plugins --plugin=/path/to/plugin.json
+```javascript
+const prompt = promptBuilder.build({
+  tools: registry.toSchemaList(),
+  claudeMd: '# 规则\n始终使用 TDD',
+  memory: '[user:profile] 资深 Go 工程师',
+  hookContext: '学习模式已启用',
+  cwd: '/projects/myapp',
+  platform: 'darwin',
+});
 ```
 
-插件 manifest 示例：
+### Memory 系统 — `src/memory/index.js`
 
-```json
-{
-  "name": "tool-pack",
-  "version": "0.1.0",
-  "capabilities": ["browser"],
-  "commands": [
-    {
-      "name": "plugin:hello",
-      "description": "Say hello",
-      "output": "hello-from-plugin"
-    }
-  ],
-  "tools": [
-    {
-      "name": "plugin_tool",
-      "capability": "delegate",
-      "output": "tool-output"
-    }
-  ]
-}
+对标 Claude Code 的双层记忆模式：
+
+- **静态层：** 项目根目录的 `CLAUDE.md`（+ 可选的用户级）
+- **动态层：** `.starkharness/memory/` 下的 YAML frontmatter `.md` 文件
+
+```markdown
+---
+name: user-role
+type: user
+description: 用户是资深 Go 工程师
+---
+深厚的 Go 专业经验，刚接触 React 和前端工具链。
+用后端类比来解释前端概念。
 ```
 
+类型：`user`（用户画像）· `feedback`（行为反馈）· `project`（项目上下文）· `reference`（外部参考）
+
+### Skill 加载 — `src/skills/loader.js`
+
+三级渐进式披露——metadata 始终廉价加载，body 按需加载，references 在需要深度上下文时加载：
+
+| 层级 | 方法 | 加载内容 |
+|------|------|----------|
+| 1 | `discoverSkills()` | 仅 frontmatter（name、description、version） |
+| 2 | `loadSkill(dir)` | 完整 SKILL.md 正文 |
+| 3 | `loadReferences(dir)` | `references/*.md` 文件 |
+
+`matchSkill(query)` 通过匹配 description 中的引号触发短语将用户查询路由到对应 Skill，并以词重叠作为兜底。
+
+### Command 解析器 — `src/commands/parser.js`
+
+Claude Code 风格的命令：YAML frontmatter 元数据 + Markdown 正文提示词。
+
+```markdown
+---
+description: 审查代码变更
+allowed-tools: Read, Bash(git:*)
+model: sonnet
+argument-hint: [file-or-directory]
 ---
 
-## 已实现的关键架构优势
+审查每个变更文件：
+- 安全漏洞
+- 性能问题
+- 测试覆盖空缺
+```
 
-### 1. 权限模型足够清晰
-相较很多大而混杂的 Agent CLI，StarkHarness 的权限层更容易维护：
+`loadCommandsFromDir(path)` 从目录批量加载所有 `.md` 命令文件。
 
-- 能力域少而稳定
-- policy 结构可序列化
-- 支持 profile + file + runtime override 三层合并
-- 支持 per-tool 覆盖
+### 权限引擎 — `src/permissions/`
 
-### 2. 插件冲突不再静默覆盖
-`PluginLoader` + diagnostics 明确暴露：
-- command 冲突
-- tool 冲突
+三级权限模型：`allow` / `ask` / `deny`，支持能力域默认值和逐工具覆盖。
 
-这为后续做：
-- 插件优先级
-- 冲突策略
-- 兼容性报告
+```javascript
+// 默认策略
+{ read: 'allow', write: 'ask', exec: 'ask', network: 'ask', delegate: 'allow' }
 
-打下了基础。
+// 工具级覆盖
+{ exec: 'allow', tools: { shell: 'deny' } }  // 允许 exec，但专门阻止 shell
+```
 
-### 3. Transcript 是一等公民
-很多系统把日志当附属品，而 StarkHarness 把运行日志变成可查询、可过滤、可回放的正式接口：
+**沙箱配置：** `permissive`（全部允许）· `safe`（默认）· `locked`（拒绝 write/exec/network/delegate）
 
-- `transcript`
-- `playback`
-- `replay-turn`
-- `replay-runner`
+**策略文件：** JSON 文件在启动时合并——支持工作区级和用户级策略。
 
-### 4. Provider 抽象已经具备演化空间
-虽然当前 provider 还是 stub，但 envelope、config、registry 都已经就位，后续替换为真实 Anthropic/OpenAI 请求时不会破坏整体设计。
+## CLI 命令
 
----
+```bash
+node src/main.js <command> [options]
+```
 
-## 当前差距
+| 命令 | 说明 |
+|------|------|
+| `blueprint` | 输出完整运行时结构（JSON） |
+| `doctor` | 验证 Harness 连线和表面计数 |
+| `providers` | 列出已注册的模型 Provider |
+| `provider-config` | 显示 Provider 配置键 |
+| `sessions` | 列出持久化的会话 |
+| `session-summary` | 当前会话状态（agents、tasks、turns） |
+| `resume <id>` | 恢复持久化的会话 |
+| `tasks` | 列出跟踪的任务 |
+| `agents` | 列出已启动的代理 |
+| `plugins` | 插件清单、能力、诊断 |
+| `profiles` | 列出沙箱配置 |
+| `transcript` | 回放事件日志 |
+| `playback` | 汇总 transcript 事件 |
+| `replay-turn` | 确定性 turn 回放骨架 |
+| `replay-runner` | 回放执行计划 |
+| `complete` | Stub Provider 补全（`--provider=openai --prompt=...`） |
 
-虽然项目已经具备了很强的内核脚手架能力，但离“真正可用的 Claude Code 级运行时”还有几个关键空缺。
+## 插件系统
 
-### 1. 还没有真实 LLM loop
-当前 `loop.js` 仍然只是 turn 执行入口，不包含：
+插件通过 manifest 注册命令、工具和能力。冲突检测会捕获跨插件的重名。
 
-- 消息构建
-- system prompt 注入
-- provider 调用
-- tool_use 解析
-- tool 调用后的循环迭代
+```javascript
+const runtime = await createRuntime({
+  plugins: [{
+    name: 'browser-pack',
+    version: '0.1.0',
+    capabilities: ['browser', 'dom-inspect'],
+    commands: [{ name: 'screenshot', description: '截取页面' }],
+    tools: [{ name: 'click', capability: 'browser', output: 'clicked' }],
+  }],
+});
+```
 
-### 2. 还没有 Hook 系统
-当前只有 `EventBus`，还没有真正的：
-- PreToolUse
-- PostToolUse
-- Stop
-- SessionStart
-- SessionEnd
-- PermissionDenied
+## Agent 编排
 
-这类可拦截生命周期。
+有界子代理，支持基于描述的路由、模型选择和工具白名单。
 
-### 3. 还没有 Tool Schema / System Prompt Builder
-目前工具是运行时对象，但还没有把它们系统化转换为：
-- LLM 可理解的 schema
-- tool descriptions
-- system message 注入片段
+```javascript
+// 启动专家代理
+await runtime.dispatchTurn({
+  tool: 'spawn_agent',
+  input: {
+    role: 'code-reviewer',
+    description: '审查代码的安全性和性能问题',
+    model: 'sonnet',
+    tools: ['read_file', 'search', 'glob'],
+  },
+});
 
-### 4. Agent 仍是骨架
-`spawn_agent` 当前只是持久化和管理数据，不是真正的：
-- 子进程
-- 子会话
-- 并发执行
-- mailbox / inbox / handoff
+// 按描述路由
+const agent = runtime.agents.matchAgent('审查这段代码的安全性');
+```
 
-### 5. Plugin 还未执行真实逻辑
-当前插件 command/tool 是 declarative mock，不执行外部 JS 模块逻辑。
+## 项目结构
 
-### 6. 还没有 MCP / LSP / Skills
-目前这些都还未接入。
+```
+src/
+├── kernel/          # 核心运行时（session、loop、context、events、hooks、prompt）
+├── permissions/     # 权限引擎、策略文件、沙箱配置
+├── tools/           # 工具类型（JSON Schema）、注册表、10 个内置工具
+├── commands/        # 命令注册表（17 个内置）+ YAML frontmatter 解析器
+├── memory/          # CLAUDE.md + 动态自动记忆
+├── skills/          # 三级渐进式 Skill 加载器
+├── agents/          # Agent 管理器（描述驱动路由）
+├── plugins/         # 插件加载器 + 冲突诊断
+├── providers/       # 模型 Provider 注册表（anthropic、openai、compatible）
+├── tasks/           # 任务所有权和跟踪
+├── state/           # JSON 文件持久化（.starkharness/）
+├── telemetry/       # 事件日志写入 transcript.jsonl
+├── capabilities/    # 功能模块映射
+├── workspace/       # Git/worktree 表面（占位）
+├── bridge/          # IDE/远程桥接（占位）
+├── ui/              # REPL 表面（占位）
+└── main.js          # CLI 入口
 
----
+tests/               # 64 个测试，8 个测试文件，node:test，零依赖
+docs/plans/          # 实现计划
+```
 
-## 建议的后续优先级
+## Claude Code 对齐
 
-### P0 — 真实 LLM Turn Loop
-目标：让 StarkHarness 从“运行时骨架”变成“真实 Agent Loop”。
-
-建议实现：
-1. user input -> messages
-2. build system prompt
-3. call provider
-4. parse tool calls
-5. dispatch tools
-6. append tool results
-7. repeat until final answer
-
-### P1 — Hook System
-把 `EventBus` 升级成真正的 hook/interceptor 系统。
-
-### P2 — System Prompt Builder
-将 `ToolRegistry`、policy、plugin 状态转成可注入模型的统一 prompt/schema。
-
-### P3 — 真实 Provider 实现
-先接真实 Anthropic，再接 OpenAI/兼容层。
-
-### P4 — Skills / MCP / LSP
-把 StarkHarness 从“内核”推进为“可用编码运行时”。
-
----
-
-## 测试情况
-
-当前测试覆盖包括：
-
-- 权限默认行为
-- sandbox profile
-- policy 文件覆盖
-- tool-scoped policy
-- session persistence
-- runtime resume
-- 文件读写编辑
-- 搜索与 glob
-- 任务/代理/消息持久化
-- provider completion stub
-- transcript replay/filter
-- plugin command/tool 注入
-- plugin 冲突检测
-- provider config 摘要
-- replay runner
-- session summary
-
-这使它虽然还是早期项目，但**核心 contract 已经比较稳**。
-
----
+| 机制 | Claude Code | StarkHarness |
+|------|-------------|-------------|
+| Hook 系统 | 9 个生命周期事件，command/prompt 类型 | `HookDispatcher`——9 个事件、匹配器、deny-wins |
+| 工具 Schema | 每个工具的 JSON Schema 供 LLM 消费 | 每个 `defineTool` 都有 `inputSchema` |
+| 系统提示词 | CLAUDE.md + 工具 + memory + hooks | `SystemPromptBuilder` 组装所有来源 |
+| Turn Loop | PreToolUse → Execute → PostToolUse | `AgentLoop.executeTurn()` 完整 Hook 链 |
+| 权限 | allow/ask/deny + 工具级覆盖 | `PermissionEngine` + 策略文件 + profiles |
+| Memory | CLAUDE.md + auto-memory YAML frontmatter | `MemoryManager` 双层模式完全对标 |
+| Skills | 三级渐进式披露 | `SkillLoader`——discover → load → references |
+| Commands | YAML frontmatter + Markdown 提示词正文 | `parseCommandFile` + allowed-tools 白名单 |
+| Agents | 描述路由、model/tools 字段 | `AgentManager.matchAgent()` + spawn 选项 |
+| 插件 | 文件夹 manifest + 冲突检测 | `PluginLoader` + diagnostics |
 
 ## 适合谁
 
-StarkHarness 适合这些场景：
+- 想从零构建 Claude Code / Codex 级运行时的开发者
+- 研究 Agent Harness 最小核心结构的架构师
+- 不想从庞大耦合的成熟产品代码开始的工程师
+- 需要把权限、日志、插件、Provider、状态这些基础层先搭扎实的团队
 
-1. 你想自己造一个 Claude Code / Codex 类 runtime
-2. 你想研究 Agent Harness 的最小核心结构
-3. 你不想从庞大、耦合严重的成熟产品代码开始
-4. 你想把权限、日志、插件、provider、状态这些基础层先搭扎实
+## 后续路线
 
----
+1. **真实 LLM 集成** — Anthropic Messages API + 流式 `tool_use` blocks
+2. **MCP 协议桥接** — stdio、SSE、HTTP、WebSocket 传输层
+3. **交互式 REPL** — 权限提示、会话管理、斜杠命令
+4. **Transcript 回放引擎** — 从事件日志确定性重执行
+5. **插件自动发现** — 文件夹约定 + npm 加载
 
-## 不适合谁
+## License
 
-如果你现在就需要一个“开箱即用、立刻能当生产级 Claude Code 替代品”的东西，StarkHarness 还不是那个阶段。
-
-它现在更像：
-
-> **一个已经跨过概念验证阶段、进入可持续演化阶段的 Agent Runtime 内核项目。**
-
----
-
-## 仓库地址
-
-GitHub：
-
-- <https://github.com/wbzuo/StarkHarness>
-
----
-
-## 总结
-
-StarkHarness 的价值不在于“代码很多”，而在于它已经把 Claude Code 类系统最重要的基础抽象拆出来了：
-
-- Tool
-- Permission
-- Session
-- State
-- Plugin
-- Provider
-- Transcript
-- Replay
-- Orchestration Skeleton
-
-如果后续继续沿着这条路线补齐：
-- 真正的 LLM 循环
-- Hook 系统
-- Prompt Builder
-- MCP/LSP/Skills
-- 真正的子代理执行
-
-那么它就能从一个**极其干净的内核脚手架**，成长为一个真正可用的编码运行时。
+MIT
