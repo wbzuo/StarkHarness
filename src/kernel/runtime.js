@@ -25,6 +25,7 @@ import { getSandboxProfile } from '../permissions/profiles.js';
 import { diagnosePluginConflicts } from '../plugins/diagnostics.js';
 import { MemoryManager } from '../memory/index.js';
 import { SkillLoader } from '../skills/loader.js';
+import { AgentRunner } from './runner.js';
 
 function createSnapshot(runtime) {
   return {
@@ -118,6 +119,18 @@ export async function createRuntime(options = {}) {
   // Agent loop
   const loop = new AgentLoop({ hooks, tools, permissions });
 
+  // Agent runner for multi-turn LLM conversations
+  const runner = new AgentRunner({
+    provider: {
+      async complete({ systemPrompt, messages, tools }) {
+        return providers.complete('anthropic', { systemPrompt, messages, tools });
+      },
+    },
+    hooks,
+    tools,
+    permissions,
+  });
+
   const runtime = {
     session,
     context,
@@ -136,6 +149,7 @@ export async function createRuntime(options = {}) {
     commands,
     memory,
     skills,
+    runner,
     promptBuilder,
     capabilities: createCapabilityMap(),
     workspace: createWorkspaceBlueprint(),
@@ -164,9 +178,16 @@ export async function createRuntime(options = {}) {
       await this.log('command:complete', { name, args, result });
       return result;
     },
+    async run(userMessage) {
+      return this.runner.run({
+        userMessage,
+        systemPrompt: this.context.systemPrompt,
+      });
+    },
   };
 
   loop.setRuntime(runtime);
+  runner.setRuntime(runtime);
   await runtime.persist();
   await runtime.log('runtime:boot', { sessionId: runtime.session.id, stateDir, resumed: Boolean(options.resumeSessionId) });
   return runtime;
