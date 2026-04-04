@@ -22,6 +22,7 @@ async function main(argv = process.argv.slice(2)) {
     policyPath: extraArgs.policy,
     pluginManifestPath: extraArgs.plugin,
     sandboxProfile: extraArgs.profile,
+    providerConfigPath: extraArgs.providers,
   });
 
   try {

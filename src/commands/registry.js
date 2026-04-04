@@ -1,6 +1,7 @@
 import { runHarnessTurn } from '../kernel/loop.js';
 import { createBlueprintDocument } from '../kernel/runtime.js';
 import { listSandboxProfiles } from '../permissions/profiles.js';
+import { createReplayPlan, evaluateReplayPlan } from '../replay/runner.js';
 
 function filterTranscript(entries, args = {}) {
   let next = entries;
@@ -105,6 +106,13 @@ export function createCommandRegistry() {
       },
     },
     {
+      name: 'provider-config',
+      description: 'Show loaded provider configuration summary',
+      async execute(runtime) {
+        return runtime.providers.describeConfig();
+      },
+    },
+    {
       name: 'tasks',
       description: 'List persisted tasks',
       async execute(runtime) {
@@ -127,6 +135,7 @@ export function createCommandRegistry() {
           capabilities: runtime.plugins.listCapabilities(),
           commands: runtime.plugins.listCommands(),
           tools: runtime.plugins.listTools(),
+          diagnostics: runtime.pluginDiagnostics,
         };
       },
     },
@@ -166,6 +175,17 @@ export function createCommandRegistry() {
           input: turn.input,
           resultSummary: result.ok === false ? result.reason : result.tool ?? result.output ?? 'ok',
         }));
+      },
+    },
+    {
+      name: 'replay-runner',
+      description: 'Build a replay execution plan from recorded turns',
+      async execute(runtime) {
+        const plan = createReplayPlan(runtime.session);
+        return {
+          plan,
+          summary: evaluateReplayPlan(plan),
+        };
       },
     },
     {

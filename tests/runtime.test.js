@@ -28,6 +28,7 @@ test('runtime boots with full blueprint surfaces', async () => {
   assert.equal(blueprint.plugins.count, 0);
   assert.equal(blueprint.orchestration.commandCount >= 11, true);
   assert.equal(blueprint.orchestration.toolCount >= 10, true);
+  assert.equal(blueprint.orchestration.pluginConflictCount, 0);
   assert.equal(blueprint.persistence.transcriptPath.endsWith('transcript.jsonl'), true);
 });
 
@@ -325,4 +326,39 @@ test('replay-turn command emits deterministic replay skeleton', async () => {
   const replay = await runtime.dispatchCommand('replay-turn');
   assert.equal(replay.length, 1);
   assert.equal(replay[0].tool, 'spawn_agent');
+});
+
+test('provider config file is loaded into provider registry summaries', async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'starkharness-provider-config-'));
+  const configPath = path.join(root, 'providers.json');
+  await writeFile(configPath, JSON.stringify({ openai: { model: 'gpt-5', baseUrl: 'https://example.com' } }), 'utf8');
+  const runtime = await createRuntime({
+    stateDir: path.join(root, '.starkharness'),
+    session: { cwd: root, goal: 'provider-config' },
+    providerConfigPath: configPath,
+  });
+
+  const summary = await runtime.dispatchCommand('provider-config');
+  assert.deepEqual(summary.openai, ['model', 'baseUrl']);
+});
+
+test('plugin diagnostics report conflicting command and tool names', async () => {
+  const { runtime } = await makeRuntime({
+    plugins: [
+      { name: 'p1', version: '0.1.0', commands: [{ name: 'dup:cmd' }], tools: [{ name: 'dup_tool' }] },
+      { name: 'p2', version: '0.1.0', commands: [{ name: 'dup:cmd' }], tools: [{ name: 'dup_tool' }] },
+    ],
+  });
+
+  const plugins = await runtime.dispatchCommand('plugins');
+  assert.equal(plugins.diagnostics.commandConflicts.length, 1);
+  assert.equal(plugins.diagnostics.toolConflicts.length, 1);
+});
+
+test('replay-runner command produces plan and summary', async () => {
+  const { runtime } = await makeRuntime();
+  await runHarnessTurn(runtime, { tool: 'spawn_agent', input: { role: 'runner' } });
+  const replayRunner = await runtime.dispatchCommand('replay-runner');
+  assert.equal(replayRunner.plan.length, 1);
+  assert.equal(replayRunner.summary.status, 'planned');
 });

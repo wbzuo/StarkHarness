@@ -7,6 +7,7 @@ import { TaskStore } from '../tasks/store.js';
 import { AgentManager } from '../agents/manager.js';
 import { PluginLoader } from '../plugins/loader.js';
 import { ProviderRegistry, createProviderBlueprint } from '../providers/index.js';
+import { loadProviderConfig } from '../providers/config.js';
 import { ToolRegistry } from '../tools/registry.js';
 import { createBuiltinTools } from '../tools/builtins/index.js';
 import { createCapabilityMap } from '../capabilities/index.js';
@@ -18,6 +19,7 @@ import { createTelemetrySink } from '../telemetry/index.js';
 import { StateStore } from '../state/store.js';
 import { loadPolicyFile, mergePolicy } from '../permissions/policy.js';
 import { getSandboxProfile } from '../permissions/profiles.js';
+import { diagnosePluginConflicts } from '../plugins/diagnostics.js';
 
 function createSnapshot(runtime) {
   return {
@@ -41,6 +43,7 @@ export async function createRuntime(options = {}) {
     ? await state.loadRuntimeSnapshot().catch(() => ({ tasks: [], agents: [], permissions: {}, plugins: [] }))
     : { tasks: [], agents: [], permissions: {}, plugins: [] };
   const filePolicy = await loadPolicyFile(options.policyPath, { includeDefaults: false });
+  const providerConfig = await loadProviderConfig(options.providerConfigPath);
   const profilePolicy = getSandboxProfile(options.sandboxProfile);
   const policy = mergePolicy(profilePolicy, filePolicy);
 
@@ -49,7 +52,7 @@ export async function createRuntime(options = {}) {
   const tasks = new TaskStore(runtimeSnapshot.tasks ?? []);
   const agents = new AgentManager(runtimeSnapshot.agents ?? []);
   const plugins = new PluginLoader(runtimeSnapshot.plugins ?? []);
-  const providers = new ProviderRegistry();
+  const providers = new ProviderRegistry(providerConfig);
   const tools = new ToolRegistry();
 
   for (const provider of createProviderBlueprint()) {
@@ -73,6 +76,7 @@ export async function createRuntime(options = {}) {
   }
 
   tools.registerPluginTools(plugins.listTools());
+  const pluginDiagnostics = diagnosePluginConflicts(plugins);
 
   const commands = new CommandRegistry(createCommandRegistry());
   commands.registerPluginCommands(plugins.listCommands());
@@ -86,6 +90,7 @@ export async function createRuntime(options = {}) {
     agents,
     plugins,
     providers,
+    pluginDiagnostics,
     tools,
     telemetry,
     state,
@@ -163,6 +168,7 @@ export function createBlueprintDocument(runtime) {
       pluginCount: runtime.plugins.list().length,
       commandCount: runtime.commands.list().length,
       toolCount: runtime.tools.list().length,
+      pluginConflictCount: runtime.pluginDiagnostics.commandConflicts.length + runtime.pluginDiagnostics.toolConflicts.length,
     },
     policy: runtime.permissions.snapshot(),
     plugins: {
@@ -170,6 +176,7 @@ export function createBlueprintDocument(runtime) {
       capabilities: runtime.plugins.listCapabilities(),
       commands: runtime.plugins.listCommands(),
       tools: runtime.plugins.listTools(),
+      diagnostics: runtime.pluginDiagnostics,
     },
     persistence: {
       rootDir: runtime.state.rootDir,

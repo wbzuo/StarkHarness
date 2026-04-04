@@ -5,6 +5,10 @@ import { createCompatibleProvider } from './compatible.js';
 export class ProviderRegistry {
   #providers = new Map();
 
+  constructor(config = {}) {
+    this.config = config;
+  }
+
   register(provider) {
     if (!provider?.id) throw new Error('Provider requires id');
     if (typeof provider.complete !== 'function') {
@@ -29,7 +33,13 @@ export class ProviderRegistry {
   async complete(id, request) {
     const provider = this.get(id);
     if (!provider) throw new Error(`Unknown provider: ${id}`);
-    return provider.complete(request);
+    return provider.complete({ ...request, config: this.config[id] ?? {} });
+  }
+
+  describeConfig() {
+    return Object.fromEntries(
+      Object.entries(this.config).map(([id, value]) => [id, Object.keys(value)]),
+    );
   }
 }
 
