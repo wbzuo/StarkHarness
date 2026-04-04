@@ -16,7 +16,8 @@ import { createBridgeBlueprint } from '../bridge/index.js';
 import { createReplBlueprint } from '../ui/repl.js';
 import { createTelemetrySink } from '../telemetry/index.js';
 import { StateStore } from '../state/store.js';
-import { loadPolicyFile } from '../permissions/policy.js';
+import { loadPolicyFile, mergePolicy } from '../permissions/policy.js';
+import { getSandboxProfile } from '../permissions/profiles.js';
 
 function createSnapshot(runtime) {
   return {
@@ -39,7 +40,9 @@ export async function createRuntime(options = {}) {
   const runtimeSnapshot = options.resumeSessionId
     ? await state.loadRuntimeSnapshot().catch(() => ({ tasks: [], agents: [], permissions: {}, plugins: [] }))
     : { tasks: [], agents: [], permissions: {}, plugins: [] };
-  const policy = await loadPolicyFile(options.policyPath);
+  const filePolicy = await loadPolicyFile(options.policyPath, { includeDefaults: false });
+  const profilePolicy = getSandboxProfile(options.sandboxProfile);
+  const policy = mergePolicy(profilePolicy, filePolicy);
 
   const events = new EventBus();
   const permissions = new PermissionEngine({ ...runtimeSnapshot.permissions, ...policy, ...options.permissions });
@@ -70,6 +73,7 @@ export async function createRuntime(options = {}) {
   }
 
   const commands = new CommandRegistry(createCommandRegistry());
+  commands.registerPluginCommands(plugins.listCommands());
 
   const runtime = {
     session,
@@ -155,11 +159,13 @@ export function createBlueprintDocument(runtime) {
       taskCount: runtime.tasks.list().length,
       agentCount: runtime.agents.list().length,
       pluginCount: runtime.plugins.list().length,
+      commandCount: runtime.commands.list().length,
     },
     policy: runtime.permissions.snapshot(),
     plugins: {
       count: runtime.plugins.list().length,
       capabilities: runtime.plugins.listCapabilities(),
+      commands: runtime.plugins.listCommands(),
     },
     persistence: {
       rootDir: runtime.state.rootDir,

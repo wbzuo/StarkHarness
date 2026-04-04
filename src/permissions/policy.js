@@ -20,9 +20,9 @@ export function mergePolicy(base, override = {}) {
   };
 }
 
-export async function loadPolicyFile(policyPath) {
-  if (!policyPath) return mergePolicy(DEFAULT_POLICY);
+export async function loadPolicyFile(policyPath, { includeDefaults = true } = {}) {
+  if (!policyPath) return includeDefaults ? mergePolicy(DEFAULT_POLICY) : {};
   const content = await readFile(policyPath, 'utf8');
   const parsed = JSON.parse(content);
-  return mergePolicy(DEFAULT_POLICY, parsed);
+  return includeDefaults ? mergePolicy(DEFAULT_POLICY, parsed) : parsed;
 }

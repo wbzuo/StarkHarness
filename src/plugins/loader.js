@@ -9,6 +9,9 @@ export function validatePluginManifest(manifest) {
   if (manifest.capabilities && !Array.isArray(manifest.capabilities)) {
     throw new Error('Plugin capabilities must be an array');
   }
+  if (manifest.commands && !Array.isArray(manifest.commands)) {
+    throw new Error('Plugin commands must be an array');
+  }
   return true;
 }
 
@@ -21,12 +24,15 @@ export class PluginLoader {
 
   register(manifest) {
     validatePluginManifest(manifest);
-    this.#plugins.push({
+    const normalized = {
       capabilities: [],
+      commands: [],
       ...manifest,
       capabilities: [...(manifest.capabilities ?? [])],
-    });
-    return manifest;
+      commands: [...(manifest.commands ?? [])],
+    };
+    this.#plugins.push(normalized);
+    return normalized;
   }
 
   async loadManifestFile(manifestPath) {
@@ -43,6 +49,15 @@ export class PluginLoader {
       plugin.capabilities.map((capability) => ({
         plugin: plugin.name,
         capability,
+      })),
+    );
+  }
+
+  listCommands() {
+    return this.#plugins.flatMap((plugin) =>
+      plugin.commands.map((command) => ({
+        plugin: plugin.name,
+        ...command,
       })),
     );
   }

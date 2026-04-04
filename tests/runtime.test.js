@@ -26,6 +26,7 @@ test('runtime boots with full blueprint surfaces', async () => {
   assert.ok(blueprint.capabilities.advanced.includes('voice'));
   assert.equal(blueprint.orchestration.taskCount, 0);
   assert.equal(blueprint.plugins.count, 0);
+  assert.equal(blueprint.orchestration.commandCount >= 11, true);
   assert.equal(blueprint.persistence.transcriptPath.endsWith('transcript.jsonl'), true);
 });
 
@@ -38,6 +39,13 @@ test('permission engine blocks ask-gated tools by default', async () => {
 
   assert.equal(result.ok, false);
   assert.equal(result.reason, 'permission-escalation-required');
+});
+
+test('sandbox profile can tighten defaults before policy merges', async () => {
+  const { runtime } = await makeRuntime({ sandboxProfile: 'locked' });
+  assert.equal(runtime.permissions.can('read'), 'allow');
+  assert.equal(runtime.permissions.can('exec'), 'deny');
+  assert.equal(runtime.permissions.can('delegate'), 'deny');
 });
 
 test('policy file can override permission defaults', async () => {
@@ -242,4 +250,37 @@ test('transcript command supports filtering and limits', async () => {
   const filtered = await runtime.dispatchCommand('transcript', { event: 'command:complete', limit: 1 });
   assert.equal(filtered.length, 1);
   assert.equal(filtered[0].eventName, 'command:complete');
+});
+
+test('plugin commands are injected into the command registry', async () => {
+  const { runtime } = await makeRuntime({
+    plugins: [
+      {
+        name: 'workflow-pack',
+        version: '0.1.0',
+        commands: [{ name: 'plugin:hello', description: 'Say hello', output: 'hello-from-plugin' }],
+      },
+    ],
+  });
+
+  const result = await runtime.dispatchCommand('plugin:hello');
+  assert.equal(result.source, 'plugin');
+  assert.equal(result.output, 'hello-from-plugin');
+});
+
+test('profiles command lists sandbox profiles', async () => {
+  const { runtime } = await makeRuntime();
+  const profiles = await runtime.dispatchCommand('profiles');
+  assert.ok(profiles.includes('safe'));
+  assert.ok(profiles.includes('locked'));
+});
+
+test('playback command summarizes transcript events', async () => {
+  const { runtime } = await makeRuntime();
+  await runtime.dispatchCommand('providers');
+  await runtime.dispatchCommand('complete', { provider: 'openai', prompt: 'playback' });
+
+  const playback = await runtime.dispatchCommand('playback', { event: 'command:complete' });
+  assert.ok(playback.totalEvents >= 1);
+  assert.ok(playback.eventNames.includes('command:complete'));
 });

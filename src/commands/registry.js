@@ -1,5 +1,6 @@
 import { runHarnessTurn } from '../kernel/loop.js';
 import { createBlueprintDocument } from '../kernel/runtime.js';
+import { listSandboxProfiles } from '../permissions/profiles.js';
 
 function filterTranscript(entries, args = {}) {
   let next = entries;
@@ -7,6 +8,22 @@ function filterTranscript(entries, args = {}) {
   if (args.query) next = next.filter((entry) => JSON.stringify(entry).includes(args.query));
   if (args.limit) next = next.slice(-Number(args.limit));
   return next;
+}
+
+function createPluginCommand(command) {
+  return {
+    name: command.name,
+    description: command.description ?? `Plugin command from ${command.plugin}`,
+    async execute(_runtime) {
+      return {
+        ok: true,
+        source: 'plugin',
+        plugin: command.plugin,
+        command: command.name,
+        output: command.output ?? null,
+      };
+    },
+  };
 }
 
 export function createCommandRegistry() {
@@ -32,6 +49,7 @@ export function createCommandRegistry() {
           policy: runtime.permissions.snapshot(),
           transcriptPath: runtime.telemetry.transcriptPath,
           plugins: runtime.plugins.list().length,
+          sandboxProfiles: listSandboxProfiles(),
         };
       },
     },
@@ -87,7 +105,15 @@ export function createCommandRegistry() {
         return {
           plugins: runtime.plugins.list(),
           capabilities: runtime.plugins.listCapabilities(),
+          commands: runtime.plugins.listCommands(),
         };
+      },
+    },
+    {
+      name: 'profiles',
+      description: 'List available sandbox profiles',
+      async execute() {
+        return listSandboxProfiles();
       },
     },
     {
@@ -95,6 +121,18 @@ export function createCommandRegistry() {
       description: 'Replay the harness event log',
       async execute(runtime, args = {}) {
         return filterTranscript(await runtime.telemetry.replay(), args);
+      },
+    },
+    {
+      name: 'playback',
+      description: 'Play transcript events back into a lightweight summary',
+      async execute(runtime, args = {}) {
+        const events = filterTranscript(await runtime.telemetry.replay(), args);
+        return {
+          totalEvents: events.length,
+          eventNames: [...new Set(events.map((entry) => entry.eventName))],
+          lastEvent: events.at(-1) ?? null,
+        };
       },
     },
     {
@@ -120,6 +158,14 @@ export class CommandRegistry {
   register(command) {
     this.#commands.set(command.name, command);
     return command;
+  }
+
+  registerMany(commands = []) {
+    commands.forEach((command) => this.register(command));
+  }
+
+  registerPluginCommands(pluginCommands = []) {
+    this.registerMany(pluginCommands.map(createPluginCommand));
   }
 
   get(name) {

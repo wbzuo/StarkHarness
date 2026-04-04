@@ -21,6 +21,7 @@ async function main(argv = process.argv.slice(2)) {
     resumeSessionId: command === 'resume' ? commandArg : undefined,
     policyPath: extraArgs.policy,
     pluginManifestPath: extraArgs.plugin,
+    sandboxProfile: extraArgs.profile,
   });
 
   try {
