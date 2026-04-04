@@ -14,6 +14,7 @@ export function createAnthropicProvider(config = {}) {
       modelFamily: 'claude',
     });
     stub.capabilities = ['chat'];
+    stub.priority = 100;
     return stub;
   }
 
@@ -22,6 +23,7 @@ export function createAnthropicProvider(config = {}) {
     purpose: 'Claude-class provider adapter',
     modelFamily: 'claude',
     capabilities: ['chat', 'tools', 'vision'],
+    priority: 1,
     async complete({ systemPrompt, messages, tools, prompt, ...rest }) {
       // Support both old (prompt-based) and new (messages-based) calling conventions
       const effectiveMessages = messages ?? (prompt ? [{ role: 'user', content: prompt }] : []);

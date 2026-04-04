@@ -1,9 +1,41 @@
 import { createStubProvider } from './base.js';
+import { callChatCompletionsAPI, formatToolsOpenAI, convertMessagesToOpenAI } from './openai-live.js';
 
-export function createCompatibleProvider() {
-  return createStubProvider({
+const DEFAULT_BASE_URL = 'https://api.deepseek.com';
+const DEFAULT_MODEL = 'deepseek-chat';
+
+export function createCompatibleProvider(config = {}) {
+  const apiKey = config.apiKey ?? process.env.COMPATIBLE_API_KEY;
+
+  if (!apiKey) {
+    const stub = createStubProvider({
+      id: 'compatible',
+      purpose: 'OpenAI/Anthropic-compatible gateway adapter (stub — set COMPATIBLE_API_KEY to enable)',
+      modelFamily: 'compatible',
+    });
+    stub.capabilities = ['chat'];
+    stub.priority = 100;
+    return stub;
+  }
+
+  return {
     id: 'compatible',
     purpose: 'OpenAI/Anthropic-compatible gateway adapter',
     modelFamily: 'compatible',
-  });
+    capabilities: ['chat', 'tools'],
+    priority: 1,
+    async complete({ systemPrompt, messages, tools, prompt }) {
+      const effectiveMessages = messages ?? (prompt ? [{ role: 'user', content: prompt }] : []);
+      const formattedTools = tools ? formatToolsOpenAI(tools) : [];
+      return callChatCompletionsAPI({
+        apiKey,
+        baseUrl: config.baseUrl ?? process.env.COMPATIBLE_BASE_URL ?? DEFAULT_BASE_URL,
+        model: config.model ?? process.env.COMPATIBLE_MODEL ?? DEFAULT_MODEL,
+        systemPrompt: systemPrompt ?? '',
+        messages: effectiveMessages,
+        tools: formattedTools,
+        maxTokens: config.maxTokens ?? 4096,
+      });
+    },
+  };
 }
