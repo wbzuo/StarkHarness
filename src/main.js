@@ -20,6 +20,7 @@ async function main(argv = process.argv.slice(2)) {
     session: { goal: 'bootstrap StarkHarness', mode: 'interactive' },
     resumeSessionId: command === 'resume' ? commandArg : undefined,
     policyPath: extraArgs.policy,
+    pluginManifestPath: extraArgs.plugin,
   });
 
   try {

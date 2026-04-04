@@ -1,22 +1,33 @@
-import { DEFAULT_POLICY } from './policy.js';
+import { DEFAULT_POLICY, mergePolicy } from './policy.js';
+
+function resolveToolDecision(toolRule, capability) {
+  if (!toolRule) return null;
+  if (typeof toolRule === 'string') return toolRule;
+  if (typeof toolRule === 'object') return toolRule[capability] ?? null;
+  return null;
+}
 
 export class PermissionEngine {
   constructor(rules = {}) {
-    this.rules = { ...DEFAULT_POLICY, ...rules };
+    this.rules = mergePolicy(DEFAULT_POLICY, rules);
   }
 
-  can(capability) {
-    return this.rules[capability] ?? 'deny';
+  can(capability, toolName) {
+    const toolDecision = resolveToolDecision(this.rules.tools?.[toolName], capability);
+    return toolDecision ?? this.rules[capability] ?? 'deny';
   }
 
-  evaluate({ capability }) {
+  evaluate({ capability, toolName }) {
+    const toolDecision = resolveToolDecision(this.rules.tools?.[toolName], capability);
     return {
       capability,
-      decision: this.can(capability),
+      toolName,
+      decision: toolDecision ?? this.rules[capability] ?? 'deny',
+      source: toolDecision ? 'tool' : 'capability',
     };
   }
 
   snapshot() {
-    return { ...this.rules };
+    return mergePolicy(DEFAULT_POLICY, this.rules);
   }
 }

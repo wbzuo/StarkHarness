@@ -1,4 +1,4 @@
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
 export class StateStore {
@@ -27,6 +27,16 @@ export class StateStore {
     const target = this.getSessionPath(sessionId);
     const content = await readFile(target, 'utf8');
     return JSON.parse(content);
+  }
+
+  async listSessions() {
+    const files = await readdir(this.sessionDir).catch(() => []);
+    return files
+      .filter((file) => file.endsWith('.json'))
+      .map((file) => ({
+        id: file.replace(/\.json$/, ''),
+        path: path.join(this.sessionDir, file),
+      }));
   }
 
   async saveRuntimeSnapshot(snapshot) {

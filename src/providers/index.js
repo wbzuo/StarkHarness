@@ -1,3 +1,7 @@
+import { createAnthropicProvider } from './anthropic.js';
+import { createOpenAIProvider } from './openai.js';
+import { createCompatibleProvider } from './compatible.js';
+
 export class ProviderRegistry {
   #providers = new Map();
 
@@ -29,27 +33,10 @@ export class ProviderRegistry {
   }
 }
 
-function createProvider(id, purpose, modelFamily) {
-  return {
-    id,
-    purpose,
-    modelFamily,
-    async complete(request) {
-      return {
-        provider: id,
-        modelFamily,
-        request,
-        status: 'stubbed',
-        output: `stub:${id}:${request.prompt ?? ''}`,
-      };
-    },
-  };
-}
-
 export function createProviderBlueprint() {
   return [
-    createProvider('anthropic', 'Claude-class provider adapter', 'claude'),
-    createProvider('openai', 'Codex/GPT-class provider adapter', 'gpt'),
-    createProvider('compatible', 'OpenAI/Anthropic-compatible gateway adapter', 'compatible'),
+    createAnthropicProvider(),
+    createOpenAIProvider(),
+    createCompatibleProvider(),
   ];
 }

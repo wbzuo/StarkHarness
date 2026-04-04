@@ -1,6 +1,14 @@
 import { runHarnessTurn } from '../kernel/loop.js';
 import { createBlueprintDocument } from '../kernel/runtime.js';
 
+function filterTranscript(entries, args = {}) {
+  let next = entries;
+  if (args.event) next = next.filter((entry) => entry.eventName === args.event);
+  if (args.query) next = next.filter((entry) => JSON.stringify(entry).includes(args.query));
+  if (args.limit) next = next.slice(-Number(args.limit));
+  return next;
+}
+
 export function createCommandRegistry() {
   return [
     {
@@ -23,6 +31,7 @@ export function createCommandRegistry() {
           sessionPath: runtime.state.getSessionPath(runtime.session.id),
           policy: runtime.permissions.snapshot(),
           transcriptPath: runtime.telemetry.transcriptPath,
+          plugins: runtime.plugins.list().length,
         };
       },
     },
@@ -41,6 +50,13 @@ export function createCommandRegistry() {
       description: 'Load the current session snapshot',
       async execute(runtime) {
         return runtime.state.loadSession(runtime.session.id);
+      },
+    },
+    {
+      name: 'sessions',
+      description: 'List persisted sessions',
+      async execute(runtime) {
+        return runtime.state.listSessions();
       },
     },
     {
@@ -65,10 +81,20 @@ export function createCommandRegistry() {
       },
     },
     {
+      name: 'plugins',
+      description: 'List registered plugins and capabilities',
+      async execute(runtime) {
+        return {
+          plugins: runtime.plugins.list(),
+          capabilities: runtime.plugins.listCapabilities(),
+        };
+      },
+    },
+    {
       name: 'transcript',
       description: 'Replay the harness event log',
-      async execute(runtime) {
-        return runtime.telemetry.replay();
+      async execute(runtime, args = {}) {
+        return filterTranscript(await runtime.telemetry.replay(), args);
       },
     },
     {

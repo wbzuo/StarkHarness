@@ -25,6 +25,7 @@ test('runtime boots with full blueprint surfaces', async () => {
   assert.equal(runtime.tools.list().length, 10);
   assert.ok(blueprint.capabilities.advanced.includes('voice'));
   assert.equal(blueprint.orchestration.taskCount, 0);
+  assert.equal(blueprint.plugins.count, 0);
   assert.equal(blueprint.persistence.transcriptPath.endsWith('transcript.jsonl'), true);
 });
 
@@ -51,6 +52,21 @@ test('policy file can override permission defaults', async () => {
 
   assert.equal(runtime.permissions.can('exec'), 'allow');
   assert.equal(runtime.permissions.can('write'), 'deny');
+});
+
+
+test('tool-scoped policy overrides capability decisions', async () => {
+  const { runtime } = await makeRuntime({
+    permissions: { exec: 'allow', tools: { shell: 'deny' } },
+  });
+  const result = await runHarnessTurn(runtime, {
+    tool: 'shell',
+    input: { command: 'echo test' },
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.reason, 'permission-denied');
+  assert.equal(result.gate.source, 'tool');
 });
 
 test('allowing read tools executes successfully', async () => {
@@ -197,4 +213,33 @@ test('transcript command replays event log', async () => {
   assert.ok(transcript.some((entry) => entry.eventName === 'runtime:boot'));
   assert.ok(transcript.some((entry) => entry.eventName === 'command:complete'));
   assert.ok(transcript.some((entry) => entry.eventName === 'turn:complete'));
+});
+
+test('plugin loader registers manifests and exposes capabilities', async () => {
+  const { runtime } = await makeRuntime({
+    plugins: [
+      { name: 'browser-pack', version: '0.1.0', capabilities: ['browser', 'dom-inspect'] },
+    ],
+  });
+
+  const plugins = await runtime.dispatchCommand('plugins');
+  assert.equal(plugins.plugins.length, 1);
+  assert.equal(plugins.capabilities.length, 2);
+  assert.equal(plugins.capabilities[0].plugin, 'browser-pack');
+});
+
+test('sessions command lists persisted sessions', async () => {
+  const { runtime } = await makeRuntime();
+  const sessions = await runtime.dispatchCommand('sessions');
+  assert.ok(sessions.some((session) => session.id === runtime.session.id));
+});
+
+test('transcript command supports filtering and limits', async () => {
+  const { runtime } = await makeRuntime();
+  await runtime.dispatchCommand('providers');
+  await runtime.dispatchCommand('complete', { provider: 'anthropic', prompt: 'probe' });
+
+  const filtered = await runtime.dispatchCommand('transcript', { event: 'command:complete', limit: 1 });
+  assert.equal(filtered.length, 1);
+  assert.equal(filtered[0].eventName, 'command:complete');
 });

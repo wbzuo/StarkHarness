@@ -24,6 +24,7 @@ function createSnapshot(runtime) {
     tasks: runtime.tasks.snapshot(),
     agents: runtime.agents.snapshot(),
     permissions: runtime.permissions.snapshot(),
+    plugins: runtime.plugins.snapshot(),
   };
 }
 
@@ -36,15 +37,15 @@ export async function createRuntime(options = {}) {
     ? await state.loadSession(options.resumeSessionId)
     : null;
   const runtimeSnapshot = options.resumeSessionId
-    ? await state.loadRuntimeSnapshot().catch(() => ({ tasks: [], agents: [], permissions: {} }))
-    : { tasks: [], agents: [], permissions: {} };
+    ? await state.loadRuntimeSnapshot().catch(() => ({ tasks: [], agents: [], permissions: {}, plugins: [] }))
+    : { tasks: [], agents: [], permissions: {}, plugins: [] };
   const policy = await loadPolicyFile(options.policyPath);
 
   const events = new EventBus();
   const permissions = new PermissionEngine({ ...runtimeSnapshot.permissions, ...policy, ...options.permissions });
   const tasks = new TaskStore(runtimeSnapshot.tasks ?? []);
   const agents = new AgentManager(runtimeSnapshot.agents ?? []);
-  const plugins = new PluginLoader();
+  const plugins = new PluginLoader(runtimeSnapshot.plugins ?? []);
   const providers = new ProviderRegistry();
   const tools = new ToolRegistry();
 
@@ -61,6 +62,13 @@ export async function createRuntime(options = {}) {
 
   const session = resumed ?? createSession(options.session);
   const context = createContextEnvelope({ cwd: session.cwd, mode: session.mode });
+  if (options.pluginManifestPath) {
+    await plugins.loadManifestFile(options.pluginManifestPath);
+  }
+  for (const plugin of options.plugins ?? []) {
+    plugins.register(plugin);
+  }
+
   const commands = new CommandRegistry(createCommandRegistry());
 
   const runtime = {
@@ -92,7 +100,7 @@ export async function createRuntime(options = {}) {
       const tool = this.tools.get(turn.tool);
       if (!tool) throw new Error(`Unknown tool: ${turn.tool}`);
 
-      const gate = this.permissions.evaluate({ capability: tool.capability });
+      const gate = this.permissions.evaluate({ capability: tool.capability, toolName: tool.name });
       if (gate.decision === 'deny') {
         const denied = { ok: false, reason: 'permission-denied', tool: tool.name, gate };
         await this.log('turn:denied', denied);
@@ -146,8 +154,13 @@ export function createBlueprintDocument(runtime) {
     orchestration: {
       taskCount: runtime.tasks.list().length,
       agentCount: runtime.agents.list().length,
+      pluginCount: runtime.plugins.list().length,
     },
     policy: runtime.permissions.snapshot(),
+    plugins: {
+      count: runtime.plugins.list().length,
+      capabilities: runtime.plugins.listCapabilities(),
+    },
     persistence: {
       rootDir: runtime.state.rootDir,
       sessionPath: runtime.state.getSessionPath(runtime.session.id),
