@@ -24,11 +24,16 @@ export class ProviderRegistry {
   }
 
   list() {
-    return [...this.#providers.values()].map(({ id, purpose, modelFamily }) => ({
+    return [...this.#providers.values()].map(({ id, purpose, modelFamily, capabilities }) => ({
       id,
       purpose,
       modelFamily,
+      capabilities: capabilities ?? ['chat'],
     }));
+  }
+
+  listDetailed() {
+    return [...this.#providers.values()].map((provider) => ({ ...provider }));
   }
 
   async complete(id, request) {
@@ -45,7 +50,11 @@ export class ProviderRegistry {
 
   async completeWithStrategy({ capability = 'chat', prefer, request, retryOptions } = {}) {
     const strategy = new ModelStrategy({
-      providers: this.list().map((p) => ({ ...p, capabilities: p.capabilities ?? ['chat'] })),
+      providers: this.listDetailed().map((p) => ({
+        id: p.id,
+        capabilities: p.capabilities ?? ['chat'],
+        priority: p.priority,
+      })),
     });
     const providerId = strategy.select({ require: capability, prefer });
     if (!providerId) throw new Error(`No provider available for capability: ${capability}`);

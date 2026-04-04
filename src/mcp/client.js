@@ -55,8 +55,12 @@ export class McpStdioClient {
 
   async disconnect() {
     if (this.#process) {
-      this.#process.stdin.end();
-      this.#process.kill();
+      try {
+        this.#process.stdin.end();
+      } catch {}
+      try {
+        this.#process.kill();
+      } catch {}
       this.#process = null;
     }
   }
