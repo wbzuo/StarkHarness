@@ -32,6 +32,7 @@ export class SkillLoader {
       const { meta } = parseFrontmatter(content);
       const metadata = {
         dir: entry.name,
+        path: path.join(this.#skillsDir, entry.name),
         name: meta.name ?? entry.name,
         description: meta.description ?? '',
         version: meta.version ?? '0.0.0',
@@ -48,6 +49,7 @@ export class SkillLoader {
     const { meta, body } = parseFrontmatter(content);
     return {
       dir: dirName,
+      path: path.join(this.#skillsDir, dirName),
       name: meta.name ?? dirName,
       description: meta.description ?? '',
       version: meta.version ?? '0.0.0',

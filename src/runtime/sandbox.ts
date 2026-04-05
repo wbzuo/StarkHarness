@@ -5,7 +5,7 @@
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
-const childRuntimePath = fileURLToPath(new URL('../agents/child-runtime.js', import.meta.url));
+const childRuntimePath = fileURLToPath(new URL('../agents/child-runtime.ts', import.meta.url));
 
 export class ExecutionProvider {
   constructor({ mode = 'local', options = {} } = {}) {
@@ -41,8 +41,8 @@ export class ExecutionProvider {
   // Mode: process — run in a child Node.js process via IPC
   async #executeProcess(payload, callbacks) {
     return new Promise((resolve, reject) => {
-      const child = spawn(process.execPath, [childRuntimePath], {
-        cwd: payload.cwd,
+      const child = spawn(process.execPath, ['--import', 'tsx', childRuntimePath], {
+        cwd: process.cwd(),
         stdio: ['ignore', 'ignore', 'pipe', 'ipc'],
         env: { ...process.env, ...(this.options.env ?? {}) },
       });

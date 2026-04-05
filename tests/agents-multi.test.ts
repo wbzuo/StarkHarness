@@ -356,3 +356,27 @@ test('AgentExecutor supports process-isolated agents', async () => {
   assert.equal(agentState.completedTasks, 1);
   await runtime.shutdown();
 });
+
+test('AgentManager defaults isolation to local and honors legacy inline alias', async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'starkharness-inline-agent-'));
+  const runtime = await createRuntime({ stateDir: path.join(root, '.starkharness'), session: { cwd: root, goal: 'inline-agent' } });
+  const defaultAgent = runtime.agents.spawn({ id: 'agent-default', role: 'reviewer', tools: ['read_file'] });
+  const legacyAgent = runtime.agents.spawn({ id: 'agent-legacy', role: 'reviewer', isolation: 'inline', tools: ['read_file'] });
+
+  runtime.providers.completeWithStrategy = async () => ({
+    text: 'stub:inline-compatible',
+    toolCalls: [],
+    stopReason: 'end_turn',
+    usage: {},
+  });
+
+  const defaultResult = await runtime.executor.execute(defaultAgent, { id: 'task-default', subject: 'default path' });
+  const legacyResult = await runtime.executor.execute(legacyAgent, { id: 'task-legacy', subject: 'legacy path' });
+
+  assert.equal(defaultAgent.isolation, 'local');
+  assert.equal(defaultResult.isolation, 'local');
+  assert.equal(legacyResult.isolation, 'local');
+  assert.equal(defaultResult.finalText, 'stub:inline-compatible');
+  assert.equal(legacyResult.finalText, 'stub:inline-compatible');
+  await runtime.shutdown();
+});

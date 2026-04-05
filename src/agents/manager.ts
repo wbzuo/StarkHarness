@@ -18,7 +18,7 @@ export class AgentManager {
     id,
     prompt = '',
     model = 'inherit',
-    isolation = 'inline',
+    isolation = 'local',
     tools = [],
     description = '',
     color = 'blue',

@@ -3,6 +3,7 @@ import path from 'node:path';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { defineTool } from '../types.js';
+import { ensureWebAccessReady, callWebAccessProxy, loadSiteContext } from '../../web-access/index.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -155,8 +156,15 @@ export function createBuiltinTools() {
       async execute(input = {}, runtime) {
         const command = input.command ?? 'pwd';
         const timeout = input.timeout ?? 120000;
+        const skillEnv = runtime.context.activeSkill?.dir
+          ? {
+            CLAUDE_SKILL_DIR: runtime.context.activeSkill.dir,
+            STARKHARNESS_ACTIVE_SKILL: runtime.context.activeSkill.name ?? '',
+          }
+          : {};
         const { stdout, stderr } = await execFileAsync('/bin/sh', ['-c', command], {
           cwd: runtime.context.cwd,
+          env: { ...process.env, ...skillEnv },
           maxBuffer: 4 * 1024 * 1024,
           timeout,
         });
@@ -228,6 +236,163 @@ export function createBuiltinTools() {
         const response = await fetch(input.url);
         const content = await response.text();
         return { ok: true, tool: 'fetch_url', url: input.url, status: response.status, content };
+      },
+    }),
+
+    defineTool({
+      name: 'browser_targets',
+      capability: 'network',
+      description: 'List browser targets from the bundled web-access CDP proxy.',
+      inputSchema: {
+        type: 'object',
+        properties: {},
+      },
+      async execute(_input = {}, runtime) {
+        const skillDir = await ensureWebAccessReady({ cwd: runtime.context.cwd });
+        const result = await callWebAccessProxy('/targets');
+        return { ok: true, tool: 'browser_targets', skillDir, targets: result.data };
+      },
+    }),
+
+    defineTool({
+      name: 'browser_open',
+      capability: 'network',
+      description: 'Open a URL in a browser tab through the bundled web-access CDP proxy.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          url: { type: 'string', description: 'URL to open in a new browser tab' },
+        },
+        required: ['url'],
+      },
+      async execute(input = {}, runtime) {
+        const skillDir = await ensureWebAccessReady({ cwd: runtime.context.cwd });
+        const result = await callWebAccessProxy(`/new?url=${encodeURIComponent(input.url)}`);
+        return { ok: true, tool: 'browser_open', skillDir, target: result.data };
+      },
+    }),
+
+    defineTool({
+      name: 'browser_eval',
+      capability: 'network',
+      description: 'Evaluate JavaScript in a browser target through the bundled web-access CDP proxy.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          target: { type: 'string', description: 'Browser target id' },
+          expression: { type: 'string', description: 'JavaScript expression to evaluate' },
+        },
+        required: ['target', 'expression'],
+      },
+      async execute(input = {}, runtime) {
+        const skillDir = await ensureWebAccessReady({ cwd: runtime.context.cwd });
+        const result = await callWebAccessProxy(`/eval?target=${encodeURIComponent(input.target)}`, {
+          method: 'POST',
+          body: input.expression,
+        });
+        return { ok: true, tool: 'browser_eval', skillDir, result: result.data };
+      },
+    }),
+
+    defineTool({
+      name: 'browser_click',
+      capability: 'network',
+      description: 'Click an element in a browser target using JS click or a real mouse event.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          target: { type: 'string', description: 'Browser target id' },
+          selector: { type: 'string', description: 'CSS selector to click' },
+          mode: { type: 'string', enum: ['js', 'mouse'], description: 'Click mode: js for element.click(), mouse for CDP mouse events', default: 'js' },
+        },
+        required: ['target', 'selector'],
+      },
+      async execute(input = {}, runtime) {
+        const skillDir = await ensureWebAccessReady({ cwd: runtime.context.cwd });
+        const endpoint = input.mode === 'mouse' ? 'clickAt' : 'click';
+        const result = await callWebAccessProxy(`/${endpoint}?target=${encodeURIComponent(input.target)}`, {
+          method: 'POST',
+          body: input.selector,
+        });
+        return { ok: true, tool: 'browser_click', skillDir, mode: input.mode ?? 'js', result: result.data };
+      },
+    }),
+
+    defineTool({
+      name: 'browser_scroll',
+      capability: 'network',
+      description: 'Scroll a browser target through the bundled web-access CDP proxy.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          target: { type: 'string', description: 'Browser target id' },
+          y: { type: 'number', description: 'Absolute scroll offset' },
+          direction: { type: 'string', enum: ['top', 'bottom'], description: 'Convenience scroll direction' },
+        },
+        required: ['target'],
+      },
+      async execute(input = {}, runtime) {
+        const skillDir = await ensureWebAccessReady({ cwd: runtime.context.cwd });
+        const params = new URLSearchParams({ target: input.target });
+        if (input.y !== undefined) params.set('y', String(input.y));
+        if (input.direction) params.set('direction', input.direction);
+        const result = await callWebAccessProxy(`/scroll?${params.toString()}`);
+        return { ok: true, tool: 'browser_scroll', skillDir, result: result.data };
+      },
+    }),
+
+    defineTool({
+      name: 'browser_screenshot',
+      capability: 'network',
+      description: 'Capture a browser target screenshot through the bundled web-access CDP proxy.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          target: { type: 'string', description: 'Browser target id' },
+          file: { type: 'string', description: 'Absolute or relative output file path' },
+        },
+        required: ['target', 'file'],
+      },
+      async execute(input = {}, runtime) {
+        const skillDir = await ensureWebAccessReady({ cwd: runtime.context.cwd });
+        const filePath = path.resolve(runtime.context.cwd, input.file);
+        const result = await callWebAccessProxy(`/screenshot?target=${encodeURIComponent(input.target)}&file=${encodeURIComponent(filePath)}`);
+        return { ok: true, tool: 'browser_screenshot', skillDir, file: filePath, result: result.data };
+      },
+    }),
+
+    defineTool({
+      name: 'browser_close',
+      capability: 'network',
+      description: 'Close a browser target through the bundled web-access CDP proxy.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          target: { type: 'string', description: 'Browser target id' },
+        },
+        required: ['target'],
+      },
+      async execute(input = {}, runtime) {
+        const skillDir = await ensureWebAccessReady({ cwd: runtime.context.cwd });
+        const result = await callWebAccessProxy(`/close?target=${encodeURIComponent(input.target)}`);
+        return { ok: true, tool: 'browser_close', skillDir, result: result.data };
+      },
+    }),
+
+    defineTool({
+      name: 'web_site_context',
+      capability: 'read',
+      description: 'Read bundled web-access site-pattern guidance for a user query or domain.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          query: { type: 'string', description: 'Natural-language query or domain to match against site patterns' },
+        },
+        required: ['query'],
+      },
+      async execute(input = {}, runtime) {
+        const result = await loadSiteContext(input.query, { cwd: runtime.context.cwd });
+        return { ok: true, tool: 'web_site_context', skillDir: result.skillDir, context: result.context };
       },
     }),
 

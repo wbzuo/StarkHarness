@@ -2,6 +2,7 @@ import { runHarnessTurn } from '../kernel/loop.js';
 import { createBlueprintDocument } from '../kernel/runtime.js';
 import { listSandboxProfiles } from '../permissions/profiles.js';
 import { createReplayPlan, evaluateReplayPlan } from '../replay/runner.js';
+import { getWebAccessStatus } from '../web-access/index.js';
 
 function filterTranscript(entries, args = {}) {
   let next = entries;
@@ -220,6 +221,16 @@ export function createCommandRegistry() {
       description: 'List available sandbox profiles',
       async execute() {
         return listSandboxProfiles();
+      },
+    },
+    {
+      name: 'web-access-status',
+      description: 'Show bundled web-access availability, scripts, and proxy readiness',
+      async execute(runtime, args = {}) {
+        return getWebAccessStatus({
+          cwd: runtime.context.cwd,
+          ensure: args.ensure === 'true',
+        });
       },
     },
     {

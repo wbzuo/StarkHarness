@@ -13,6 +13,7 @@ export function buildDiagnostics(runtime) {
     workers: runtime.listWorkers?.() ?? [],
     mailbox: runtime.inbox?.stats?.() ?? { totalQueued: 0, pendingResponses: 0, agents: {} },
     skills: runtime.skills?.listDiscovered?.() ?? [],
+    webAccess: runtime.webAccess ?? null,
     policy: runtime.permissions.snapshot(),
     conflicts: {
       commands: runtime.pluginDiagnostics.commandConflicts,

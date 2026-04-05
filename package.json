@@ -5,15 +5,21 @@
   "description": "Atomic full-feature agent harness scaffold inspired by Claude Code-class runtimes.",
   "type": "module",
   "bin": {
-    "starkharness": "./src/main.js"
+    "starkharness": "./bin/starkharness.mjs"
   },
   "scripts": {
-    "start": "node ./src/main.js",
-    "doctor": "node ./src/main.js doctor",
-    "blueprint": "node ./src/main.js blueprint",
-    "test": "node --test"
+    "start": "node --import tsx ./src/main.ts",
+    "doctor": "node --import tsx ./src/main.ts doctor",
+    "blueprint": "node --import tsx ./src/main.ts blueprint",
+    "test": "node --import tsx --test --test-force-exit",
+    "typecheck": "tsc --noEmit"
   },
   "engines": {
     "node": ">=20"
+  },
+  "devDependencies": {
+    "@types/node": "^25.5.2",
+    "tsx": "^4.21.0",
+    "typescript": "^6.0.2"
   }
 }

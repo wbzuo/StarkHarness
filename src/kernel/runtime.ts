@@ -31,6 +31,7 @@ import { MemoryManager } from '../memory/index.js';
 import { SkillLoader } from '../skills/loader.js';
 import { matchAndBind } from '../skills/binder.js';
 import { AgentRunner } from './runner.js';
+import { describeWebAccess } from '../web-access/index.js';
 
 function createSnapshot(runtime) {
   return {
@@ -85,6 +86,7 @@ export async function createRuntime(options = {}) {
   const session = resumed ?? createSession(options.session);
   const cwd = session.cwd ?? process.cwd();
   const context = createContextEnvelope({ cwd, mode: session.mode });
+  const webAccess = await describeWebAccess({ cwd });
 
   // Memory and skills bind to session.cwd (correct for both new and resumed sessions)
   const memory = new MemoryManager({ projectDir: cwd });
@@ -137,6 +139,17 @@ export async function createRuntime(options = {}) {
   const builtinCommandConflicts = commands.registerPluginCommands(plugins.listCommands());
 
   const pluginDiagnostics = diagnosePluginConflicts(plugins, { builtinToolConflicts, builtinCommandConflicts });
+
+  // Auto-discover filesystem hooks (state-level → project-level, later dirs register later)
+  const { discoverHooks } = await import('./hook-loader.js');
+  const hookDirs = [
+    path.join(stateDir, 'hooks'),
+    path.join(cwd, 'hooks'),
+  ];
+  const fileHooks = await discoverHooks(hookDirs);
+  for (const hook of fileHooks) {
+    hooks.register(hook.event, hook);
+  }
 
   // Register hook handlers from options
   for (const [eventName, hookList] of Object.entries(options.hooks ?? {})) {
@@ -205,6 +218,7 @@ export async function createRuntime(options = {}) {
     workspace: createWorkspaceBlueprint(),
     bridge: createBridgeBlueprint(),
     ui: createReplBlueprint(),
+    webAccess,
     scheduler,
     executor: null,
     orchestrator: null,
@@ -248,6 +262,8 @@ export async function createRuntime(options = {}) {
         const full = await this.skills.loadSkill(match.dir).catch(() => null);
         if (full) {
           binding = {
+            dir: full.dir,
+            path: full.path,
             name: full.name,
             body: full.body,
             promptAddendum: `\n\n# Active Skill: ${full.name}\n\n${full.body}`,
@@ -257,11 +273,17 @@ export async function createRuntime(options = {}) {
       const effectiveSystemPrompt = binding
         ? `${this.context.systemPrompt}${binding.promptAddendum}`
         : this.context.systemPrompt;
+      const previousActiveSkill = this.context.activeSkill ?? null;
+      this.context.activeSkill = binding?.path
+        ? { name: binding.name, dir: binding.path }
+        : null;
       const result = await this.runner.run({
         userMessage,
         systemPrompt: effectiveSystemPrompt,
         onTextChunk: (chunk) => options.onTextChunk?.(chunk, { traceId: trace.traceId }),
         permissions: options.permissions,
+      }).finally(() => {
+        this.context.activeSkill = previousActiveSkill;
       });
       // Persist each tool turn back into the session
       for (const turn of result.turns) {
@@ -334,6 +356,7 @@ export function createBlueprintDocument(runtime) {
     workspace: runtime.workspace,
     bridge: runtime.bridge,
     ui: runtime.ui,
+    webAccess: runtime.webAccess,
     orchestration: {
       taskCount: runtime.tasks.list().length,
       agentCount: runtime.agents.list().length,

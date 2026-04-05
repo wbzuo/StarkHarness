@@ -3,11 +3,11 @@ import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import path from 'node:path';
 
-const mainPath = path.resolve('src/main.js');
+const mainPath = path.resolve('src/main.ts');
 
 function runCli(args, { stdin = '', timeoutMs = 2000 } = {}) {
   return new Promise((resolve, reject) => {
-    const child = spawn(process.execPath, [mainPath, ...args], {
+    const child = spawn(process.execPath, ['--import', 'tsx', mainPath, ...args], {
       cwd: process.cwd(),
       stdio: ['pipe', 'pipe', 'pipe'],
     });

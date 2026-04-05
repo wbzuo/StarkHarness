@@ -8,10 +8,10 @@ StarkHarness is a zero-dependency agent runtime kernel for building Claude Code-
 
 | Area | Current state | Notes |
 | :--- | :--- | :--- |
-| CLI runtime | Ready | `src/main.js` supports command, REPL/chat, pipe, resume, and serve modes. |
-| Multi-turn agent loop | Ready | `src/kernel/runner.js` drives provider calls, tool execution, and context compaction. |
+| CLI runtime | Ready | `src/main.ts` supports command, REPL/chat, pipe, resume, and serve modes. |
+| Multi-turn agent loop | Ready | `src/kernel/runner.ts` drives provider calls, tool execution, and context compaction. |
 | Multi-agent orchestration | Ready | Inbox, worker loops, task scheduling, and agent execution are implemented in `src/agents/` and `src/tasks/`. |
-| HTTP/SSE/WebSocket bridge | Ready | `src/bridge/http.js` exposes `/run`, `/stream`, command dispatch, and filtered WebSocket events. |
+| HTTP/SSE/WebSocket bridge | Ready | `src/bridge/http.ts` exposes `/run`, `/stream`, command dispatch, and filtered WebSocket events. |
 | MCP support | Partial | Stdio MCP clients and tool injection exist today; full MCP resources/prompts are still roadmap work. |
 | Execution isolation | Partial | Local and process modes are real; Docker mode still uses a minimal placeholder bridge. |
 | TUI / rich REPL | Partial | A readline REPL exists today; the richer TUI mentioned in the roadmap is still future work. |
@@ -20,7 +20,7 @@ StarkHarness is a zero-dependency agent runtime kernel for building Claude Code-
 
 ### 1. Boot And Runtime Composition
 
-[`src/kernel/runtime.js`](../src/kernel/runtime.js) is the composition root. `createRuntime()` wires together:
+[`src/kernel/runtime.ts`](../src/kernel/runtime.ts) is the composition root. `createRuntime()` wires together:
 
 - session and context
 - permissions and sandbox profiles
@@ -36,25 +36,25 @@ This is the clearest sign that StarkHarness is more than a collection of modules
 
 StarkHarness currently preserves both a lower-level tool turn interface and the newer multi-turn agent conversation flow.
 
-- [`src/kernel/loop.js`](../src/kernel/loop.js) executes a single tool turn through permission checks and hooks.
-- [`src/kernel/runner.js`](../src/kernel/runner.js) runs the full agent loop: build messages, call a provider, parse tool calls, execute tools, append tool results, and continue until the model stops.
+- [`src/kernel/loop.ts`](../src/kernel/loop.ts) executes a single tool turn through permission checks and hooks.
+- [`src/kernel/runner.ts`](../src/kernel/runner.ts) runs the full agent loop: build messages, call a provider, parse tool calls, execute tools, append tool results, and continue until the model stops.
 
 That split reflects the repo's evolution. It still supports deterministic tool-turn execution while the newer `runtime.run()` path handles real provider-driven conversations.
 
 ### 3. Context, Sessions, And Compaction
 
-[`src/kernel/context.js`](../src/kernel/context.js) models message history and includes token estimation plus context compaction. When the message list gets large, older history is replaced with a compact summary and the recent turns are preserved.
+[`src/kernel/context.ts`](../src/kernel/context.ts) models message history and includes token estimation plus context compaction. When the message list gets large, older history is replaced with a compact summary and the recent turns are preserved.
 
-[`src/kernel/session.js`](../src/kernel/session.js) stores the minimal persisted session shape: session id, goal, mode, turns, messages, hook state, and timestamps.
+[`src/kernel/session.ts`](../src/kernel/session.ts) stores the minimal persisted session shape: session id, goal, mode, turns, messages, hook state, and timestamps.
 
 ### 4. Providers And Model Strategy
 
-[`src/providers/index.js`](../src/providers/index.js) registers the built-in provider families and delegates provider selection to [`src/providers/strategy.js`](../src/providers/strategy.js).
+[`src/providers/index.ts`](../src/providers/index.ts) registers the built-in provider families and delegates provider selection to [`src/providers/strategy.ts`](../src/providers/strategy.ts).
 
 The provider layer already includes:
 
-- Anthropic live streaming support in [`src/providers/anthropic-live.js`](../src/providers/anthropic-live.js)
-- OpenAI-compatible chat completions and streaming in [`src/providers/openai-live.js`](../src/providers/openai-live.js)
+- Anthropic live streaming support in [`src/providers/anthropic-live.ts`](../src/providers/anthropic-live.ts)
+- OpenAI-compatible chat completions and streaming in [`src/providers/openai-live.ts`](../src/providers/openai-live.ts)
 - capability-aware provider selection and retry logic
 
 This is one of the stronger parts of the repo. It is not just a stubbed abstraction.
@@ -69,13 +69,14 @@ The kernel is the runtime backbone:
 - `runner.js` drives multi-turn conversations
 - `loop.js` executes single tool turns
 - `hooks.js` adds lifecycle interception points such as `PreToolUse`, `PostToolUse`, `Stop`, and `PreCompact`
+- `hook-loader.js` auto-discovers filesystem hooks from `.starkharness/hooks` and project `hooks/`
 - `prompt.js` and `memory/` contribute prompt assembly inputs
 
 The hook layer is intentionally simple but already useful. It behaves more like a control surface than a large plugin framework.
 
 ### Tools And MCP
 
-Built-in tools live in [`src/tools/builtins/index.js`](../src/tools/builtins/index.js). The current built-in surface includes:
+Built-in tools live in [`src/tools/builtins/index.ts`](../src/tools/builtins/index.ts). The current built-in surface includes:
 
 - workspace IO: `read_file`, `write_file`, `edit_file`
 - discovery: `search`, `glob`
@@ -84,9 +85,9 @@ Built-in tools live in [`src/tools/builtins/index.js`](../src/tools/builtins/ind
 
 MCP is not a hardcoded builtin tool. Instead:
 
-- [`src/mcp/client.js`](../src/mcp/client.js) implements a stdio JSON-RPC client
-- [`src/mcp/config.js`](../src/mcp/config.js) parses MCP server config
-- [`src/mcp/tools.js`](../src/mcp/tools.js) maps remote MCP tools into namespaced StarkHarness tools such as `mcp__server__tool`
+- [`src/mcp/client.ts`](../src/mcp/client.ts) implements a stdio JSON-RPC client
+- [`src/mcp/config.ts`](../src/mcp/config.ts) parses MCP server config
+- [`src/mcp/tools.ts`](../src/mcp/tools.ts) maps remote MCP tools into namespaced StarkHarness tools such as `mcp__server__tool`
 
 That distinction matters when documenting the system. MCP exists today, but as dynamically injected tools rather than a single builtin command.
 
@@ -94,17 +95,17 @@ That distinction matters when documenting the system. MCP exists today, but as d
 
 The multi-agent layer is real and already worth reading:
 
-- [`src/agents/manager.js`](../src/agents/manager.js) stores agent definitions and status
-- [`src/agents/inbox.js`](../src/agents/inbox.js) implements event/request/response mailboxes with correlation ids and awaitable replies
-- [`src/agents/executor.js`](../src/agents/executor.js) runs agent work with scoped tool registries
-- [`src/agents/orchestrator.js`](../src/agents/orchestrator.js) assigns tasks, supervises workers, handles retries/timeouts/cancellation, and processes inbox work
-- [`src/tasks/store.js`](../src/tasks/store.js) and [`src/tasks/scheduler.js`](../src/tasks/scheduler.js) support task persistence and dispatch
+- [`src/agents/manager.ts`](../src/agents/manager.ts) stores agent definitions and status
+- [`src/agents/inbox.ts`](../src/agents/inbox.ts) implements event/request/response mailboxes with correlation ids and awaitable replies
+- [`src/agents/executor.ts`](../src/agents/executor.ts) runs agent work with scoped tool registries
+- [`src/agents/orchestrator.ts`](../src/agents/orchestrator.ts) assigns tasks, supervises workers, handles retries/timeouts/cancellation, and processes inbox work
+- [`src/tasks/store.ts`](../src/tasks/store.ts) and [`src/tasks/scheduler.ts`](../src/tasks/scheduler.ts) support task persistence and dispatch
 
 This is one of the repo's clearest differentiators. It is not just `spawn_agent`; it also has inbox workers and task orchestration.
 
 ### Bridge And UI
 
-[`src/bridge/http.js`](../src/bridge/http.js) is the runtime's remote surface today. It already exposes:
+[`src/bridge/http.ts`](../src/bridge/http.ts) is the runtime's remote surface today. It already exposes:
 
 - `POST /run`
 - `POST /stream` for SSE
@@ -112,24 +113,26 @@ This is one of the repo's clearest differentiators. It is not just `spawn_agent`
 - `GET /health`, `/session`, `/providers`, `/tools`, `/agents`, `/tasks`, `/workers`, `/traces`
 - WebSocket broadcasting with topic, `traceId`, and `agentId` filters
 
-[`src/bridge/index.js`](../src/bridge/index.js) is explicit that the bridge status is:
+[`src/bridge/index.ts`](../src/bridge/index.ts) is explicit that the bridge status is:
 
 - `web: ready`
 - `ide: planned`
 - `remote: planned`
 - `mobile: planned`
 
-[`src/ui/repl.js`](../src/ui/repl.js) provides a simple readline-based REPL. It is functional, but it is not yet the richer multi-session TUI described in the roadmap.
+[`src/ui/repl.ts`](../src/ui/repl.ts) provides a simple readline-based REPL. It is functional, but it is not yet the richer multi-session TUI described in the roadmap.
 
 ### Memory, Skills, State, And Telemetry
 
 These four pieces give StarkHarness its "runtime" feel:
 
-- [`src/memory/index.js`](../src/memory/index.js) loads project `CLAUDE.md` plus dynamic memory files under `.starkharness/memory`
-- [`src/skills/loader.js`](../src/skills/loader.js) discovers skill packs from the filesystem
-- [`src/skills/binder.js`](../src/skills/binder.js) turns a matched skill into extra system prompt context
-- [`src/state/store.js`](../src/state/store.js) persists sessions, runtime snapshots, agent state, transcripts, and worker status
-- [`src/telemetry/index.js`](../src/telemetry/index.js) records JSONL transcripts and trace spans
+- [`src/memory/index.ts`](../src/memory/index.ts) loads project `CLAUDE.md` plus dynamic memory files under `.starkharness/memory`
+- [`src/skills/loader.ts`](../src/skills/loader.ts) discovers skill packs from the filesystem
+- [`src/skills/binder.ts`](../src/skills/binder.ts) turns a matched skill into extra system prompt context
+- [`src/state/store.ts`](../src/state/store.ts) persists sessions, runtime snapshots, agent state, transcripts, and worker status
+- [`src/telemetry/index.ts`](../src/telemetry/index.ts) records JSONL transcripts and trace spans
+
+The repo now also ships a bundled [`skills/web-access`](../skills/web-access/SKILL.md) pack. Combined with `CLAUDE_SKILL_DIR` propagation inside the shell tool, this gives the default runtime a built-in path for network/search/browser workflows without requiring a separate skill install step.
 
 None of these systems are overbuilt yet, but all of them are integrated into the actual runtime path.
 
@@ -153,12 +156,12 @@ None of these systems are overbuilt yet, but all of them are integrated into the
 
 If you want to understand the codebase quickly, read in this order:
 
-1. [`src/main.js`](../src/main.js)
-2. [`src/kernel/runtime.js`](../src/kernel/runtime.js)
-3. [`src/kernel/runner.js`](../src/kernel/runner.js)
-4. [`src/tools/builtins/index.js`](../src/tools/builtins/index.js)
-5. [`src/agents/orchestrator.js`](../src/agents/orchestrator.js)
-6. [`src/bridge/http.js`](../src/bridge/http.js)
-7. [`src/state/store.js`](../src/state/store.js)
+1. [`src/main.ts`](../src/main.ts)
+2. [`src/kernel/runtime.ts`](../src/kernel/runtime.ts)
+3. [`src/kernel/runner.ts`](../src/kernel/runner.ts)
+4. [`src/tools/builtins/index.ts`](../src/tools/builtins/index.ts)
+5. [`src/agents/orchestrator.ts`](../src/agents/orchestrator.ts)
+6. [`src/bridge/http.ts`](../src/bridge/http.ts)
+7. [`src/state/store.ts`](../src/state/store.ts)
 
 That path gives you the runtime shell, the agent loop, the tool surface, the multi-agent control plane, the remote API, and persistence in the smallest number of files.

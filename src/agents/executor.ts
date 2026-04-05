@@ -24,7 +24,7 @@ function createAgentSession(agent, execution, result) {
 }
 
 function resolveIsolationMode(agent, runtime, tools) {
-  const mode = agent.isolation ?? 'local';
+  const mode = agent.isolation === 'inline' ? 'local' : (agent.isolation ?? 'local');
   if (mode === 'local') return 'local';
   // Process/docker isolation requires portable tools (no delegate tools, no custom hooks)
   if ((runtime.hooks.listHandlers?.() ?? []).length > 0) return 'local';
@@ -156,7 +156,7 @@ export class AgentExecutor {
       turns: result.turns,
       stopReason: result.stopReason,
       usage: result.usage,
-      isolation: 'inline',
+      isolation: 'local',
     };
   }
 

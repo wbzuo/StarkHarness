@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, readFile, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
 import { createRuntime, createBlueprintDocument } from '../src/kernel/runtime.js';
@@ -22,8 +22,9 @@ test('runtime boots with full blueprint surfaces', async () => {
 
   assert.equal(blueprint.name, 'StarkHarness');
   assert.equal(runtime.providers.list().length, 3);
-  assert.equal(runtime.tools.list().length, 10);
+  assert.equal(runtime.tools.list().length >= 18, true);
   assert.ok(blueprint.capabilities.advanced.includes('voice'));
+  assert.equal(blueprint.webAccess.available, true);
   assert.equal(blueprint.orchestration.taskCount, 0);
   assert.equal(blueprint.plugins.count, 0);
   assert.equal(blueprint.orchestration.commandCount >= 11, true);
@@ -100,6 +101,51 @@ test('runtime persists session state after turns', async () => {
   const saved = JSON.parse(await readFile(runtime.state.getSessionPath(runtime.session.id), 'utf8'));
   assert.equal(saved.id, runtime.session.id);
   assert.equal(saved.turns.length, 1);
+});
+
+test('runtime auto-loads filesystem hooks from state and project directories', async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'starkharness-hook-runtime-'));
+  const stateDir = path.join(root, '.starkharness');
+  const stateHooksDir = path.join(stateDir, 'hooks');
+  const projectHooksDir = path.join(root, 'hooks');
+  await mkdir(stateHooksDir, { recursive: true });
+  await mkdir(projectHooksDir, { recursive: true });
+
+  await writeFile(path.join(stateHooksDir, 'session-start.js'), `export default {
+    event: 'SessionStart',
+    async handler() {
+      return { additionalContext: 'state hook context' };
+    },
+  };`, 'utf8');
+
+  await writeFile(path.join(projectHooksDir, 'pre-shell-guard.js'), `export default {
+    event: 'PreToolUse',
+    matcher: 'shell',
+    async handler({ toolInput }) {
+      if ((toolInput?.command ?? '').includes('rm -rf')) {
+        return { decision: 'deny', reason: 'blocked-by-file-hook' };
+      }
+      return { decision: 'allow' };
+    },
+  };`, 'utf8');
+
+  const runtime = await createRuntime({
+    stateDir,
+    session: { cwd: root, goal: 'hook-runtime' },
+    permissions: { exec: 'allow' },
+  });
+
+  assert.ok(runtime.context.systemPrompt.includes('state hook context'));
+
+  const result = await runHarnessTurn(runtime, {
+    tool: 'shell',
+    input: { command: 'rm -rf ./tmp' },
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.reason, 'hook-denied');
+  assert.equal(result.hookReason, 'blocked-by-file-hook');
+  await runtime.shutdown();
 });
 
 test('write and edit tools modify workspace files when permitted', async () => {
@@ -442,6 +488,58 @@ Review instructions here`,
   assert.ok(result._systemPrompt.includes('Active Skill: review'));
 });
 
+test('runtime.run exposes active skill directory to shell commands', async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'starkharness-skill-env-'));
+  const skillDir = path.join(root, 'skills', 'web-access');
+  await mkdir(skillDir, { recursive: true });
+  await writeFile(
+    path.join(skillDir, 'SKILL.md'),
+    `---
+name: web-access
+description: use web access for search page reading and browser tasks
+version: 1.0.0
+---
+Use web access for all network operations.`,
+    'utf8',
+  );
+
+  const runtime = await createRuntime({
+    stateDir: path.join(root, '.starkharness'),
+    session: { cwd: root, goal: 'skill-env' },
+    permissions: { exec: 'allow' },
+  });
+
+  let calls = 0;
+  runtime.providers.completeWithStrategy = async ({ request }) => {
+    calls += 1;
+    if (calls === 1) {
+      return {
+        text: '',
+        toolCalls: [{
+          id: 'tu_1',
+          name: 'shell',
+          input: {
+            command: `${process.execPath} -e "process.stdout.write(process.env.CLAUDE_SKILL_DIR || '')"`,
+          },
+        }],
+        stopReason: 'tool_use',
+        usage: {},
+      };
+    }
+    return {
+      text: request.messages.at(-1)?.content?.[0]?.content ?? '',
+      toolCalls: [],
+      stopReason: 'end_turn',
+      usage: {},
+    };
+  };
+
+  const result = await runtime.run('please use web access to inspect a page');
+  const shellResult = JSON.parse(result.finalText);
+  assert.equal(result.activeSkill, 'web-access');
+  assert.equal(shellResult.stdout, skillDir);
+});
+
 test('runtime.shutdown disconnects all MCP clients', async () => {
   const { runtime } = await makeRuntime();
   let disconnected = 0;
@@ -472,6 +570,17 @@ test('worker-state command returns persisted worker metrics', async () => {
   await runtime.stopWorker('agent-1');
   const workerState = await runtime.dispatchCommand('worker-state', { agent: 'agent-1' });
   assert.equal(workerState.processedMessages >= 1, true);
+  await runtime.shutdown();
+});
+
+test('web-access-status command reports bundled skill metadata', async () => {
+  const { runtime } = await makeRuntime();
+  const status = await runtime.dispatchCommand('web-access-status');
+  assert.equal(status.available, true);
+  assert.ok(status.skillDir.endsWith(path.join('skills', 'web-access')));
+  assert.equal(status.scripts.checkDeps, true);
+  assert.equal(status.scripts.cdpProxy, true);
+  assert.equal(status.scripts.matchSite, true);
   await runtime.shutdown();
 });
 

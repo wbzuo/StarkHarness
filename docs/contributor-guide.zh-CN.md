@@ -10,10 +10,10 @@
 
 ```bash
 npm test
-node src/main.js doctor
-node src/main.js blueprint
-node src/main.js repl
-node src/main.js serve --port=3000
+node --import tsx src/main.ts doctor
+node --import tsx src/main.ts blueprint
+node --import tsx src/main.ts repl
+node --import tsx src/main.ts serve --port=3000
 ```
 
 这些命令的用途分别是：
@@ -30,13 +30,13 @@ node src/main.js serve --port=3000
 
 如果你第一次接触这个仓库，建议先按下面顺序阅读，再开始改行为：
 
-1. [`src/main.js`](../src/main.js)
-2. [`src/kernel/runtime.js`](../src/kernel/runtime.js)
-3. [`src/kernel/runner.js`](../src/kernel/runner.js)
-4. [`src/tools/builtins/index.js`](../src/tools/builtins/index.js)
-5. [`src/agents/orchestrator.js`](../src/agents/orchestrator.js)
-6. [`src/bridge/http.js`](../src/bridge/http.js)
-7. [`src/state/store.js`](../src/state/store.js)
+1. [`src/main.ts`](../src/main.ts)
+2. [`src/kernel/runtime.ts`](../src/kernel/runtime.ts)
+3. [`src/kernel/runner.ts`](../src/kernel/runner.ts)
+4. [`src/tools/builtins/index.ts`](../src/tools/builtins/index.ts)
+5. [`src/agents/orchestrator.ts`](../src/agents/orchestrator.ts)
+6. [`src/bridge/http.ts`](../src/bridge/http.ts)
+7. [`src/state/store.ts`](../src/state/store.ts)
 
 这条路径可以用最少的上下文切换，把入口、运行时装配、Agent loop、tool surface、多 Agent 控制平面、远程 API 和持久化串起来。
 
@@ -56,7 +56,7 @@ node src/main.js serve --port=3000
 
 ### Runner 的消息结构
 
-[`src/kernel/runner.js`](../src/kernel/runner.js) 与 live provider adapter 依赖一套非常具体的内部消息格式：
+[`src/kernel/runner.ts`](../src/kernel/runner.ts) 与 live provider adapter 依赖一套非常具体的内部消息格式：
 
 - assistant 普通文本消息
 - assistant `tool_use` blocks
@@ -66,7 +66,7 @@ node src/main.js serve --port=3000
 
 ### Agent 隔离执行
 
-[`src/agents/executor.js`](../src/agents/executor.js) 与 [`src/runtime/sandbox.js`](../src/runtime/sandbox.js) 还在演进过程中。当前 `local` 和 `process` 路径是真实可用的，但 Docker 执行目前仍然只是一个最小占位实现。
+[`src/agents/executor.ts`](../src/agents/executor.ts) 与 [`src/runtime/sandbox.ts`](../src/runtime/sandbox.ts) 还在演进过程中。当前 `local` 和 `process` 路径是真实可用的，但 Docker 执行目前仍然只是一个最小占位实现。
 
 尤其要注意：
 
@@ -76,7 +76,7 @@ node src/main.js serve --port=3000
 
 ### Bridge 行为
 
-[`src/bridge/http.js`](../src/bridge/http.js) 现在同时承载了多种职责：
+[`src/bridge/http.ts`](../src/bridge/http.ts) 现在同时承载了多种职责：
 
 - auth token 提取
 - 基于 profile 的 permission override
@@ -88,7 +88,7 @@ node src/main.js serve --port=3000
 
 ### 持久化格式
 
-[`src/state/store.js`](../src/state/store.js) 直接写 JSON 和 JSONL 文件。这样做的优点是简单透明，但也意味着一旦格式变化，很快就会变成兼容性变化。
+[`src/state/store.ts`](../src/state/store.ts) 直接写 JSON 和 JSONL 文件。这样做的优点是简单透明，但也意味着一旦格式变化，很快就会变成兼容性变化。
 
 ## 最值得推进的下一批改进
 

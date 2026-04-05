@@ -3,7 +3,7 @@ import { createRuntime } from '../src/kernel/runtime.js';
 
 if (!process.env.ANTHROPIC_API_KEY) {
   console.log('Set ANTHROPIC_API_KEY to run this example');
-  console.log('Example: ANTHROPIC_API_KEY=sk-ant-... node examples/04-agent-run.js');
+  console.log('Example: ANTHROPIC_API_KEY=sk-ant-... node --import tsx examples/04-agent-run.ts');
   process.exit(0);
 }
 

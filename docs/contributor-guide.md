@@ -10,10 +10,10 @@ Use Node.js 20 or newer.
 
 ```bash
 npm test
-node src/main.js doctor
-node src/main.js blueprint
-node src/main.js repl
-node src/main.js serve --port=3000
+node --import tsx src/main.ts doctor
+node --import tsx src/main.ts blueprint
+node --import tsx src/main.ts repl
+node --import tsx src/main.ts serve --port=3000
 ```
 
 What these give you:
@@ -30,13 +30,13 @@ Note: the bridge tests bind to `127.0.0.1`. In restricted sandboxes they may fai
 
 If you are new to the repo, read in this order before editing behavior:
 
-1. [`src/main.js`](../src/main.js)
-2. [`src/kernel/runtime.js`](../src/kernel/runtime.js)
-3. [`src/kernel/runner.js`](../src/kernel/runner.js)
-4. [`src/tools/builtins/index.js`](../src/tools/builtins/index.js)
-5. [`src/agents/orchestrator.js`](../src/agents/orchestrator.js)
-6. [`src/bridge/http.js`](../src/bridge/http.js)
-7. [`src/state/store.js`](../src/state/store.js)
+1. [`src/main.ts`](../src/main.ts)
+2. [`src/kernel/runtime.ts`](../src/kernel/runtime.ts)
+3. [`src/kernel/runner.ts`](../src/kernel/runner.ts)
+4. [`src/tools/builtins/index.ts`](../src/tools/builtins/index.ts)
+5. [`src/agents/orchestrator.ts`](../src/agents/orchestrator.ts)
+6. [`src/bridge/http.ts`](../src/bridge/http.ts)
+7. [`src/state/store.ts`](../src/state/store.ts)
 
 That sequence gives you entrypoints, runtime composition, the agent loop, the tool surface, orchestration, remote APIs, and persistence with minimal context switching.
 
@@ -56,7 +56,7 @@ If you want a low-risk first patch, improve docs, add tests, or tighten diagnost
 
 ### Runner Message Shapes
 
-[`src/kernel/runner.js`](../src/kernel/runner.js) and the live provider adapters depend on a very specific internal message shape:
+[`src/kernel/runner.ts`](../src/kernel/runner.ts) and the live provider adapters depend on a very specific internal message shape:
 
 - assistant text messages
 - assistant `tool_use` blocks
@@ -66,7 +66,7 @@ If you change these shapes, you must update both provider adapters and the runne
 
 ### Agent Isolation
 
-[`src/agents/executor.js`](../src/agents/executor.js) and [`src/runtime/sandbox.js`](../src/runtime/sandbox.js) are still evolving. The current implementation supports local and process execution paths, but Docker execution is still only a minimal placeholder.
+[`src/agents/executor.ts`](../src/agents/executor.ts) and [`src/runtime/sandbox.ts`](../src/runtime/sandbox.ts) are still evolving. The current implementation supports local and process execution paths, but Docker execution is still only a minimal placeholder.
 
 Be especially careful with:
 
@@ -76,7 +76,7 @@ Be especially careful with:
 
 ### Bridge Behavior
 
-[`src/bridge/http.js`](../src/bridge/http.js) now carries several responsibilities at once:
+[`src/bridge/http.ts`](../src/bridge/http.ts) now carries several responsibilities at once:
 
 - auth token extraction
 - profile-based permission overrides
@@ -88,7 +88,7 @@ Small changes here can affect both remote clients and local tests quickly.
 
 ### Persistence Format
 
-[`src/state/store.js`](../src/state/store.js) writes JSON and JSONL files directly. That is simple and readable, but it also means format changes become compatibility changes very quickly.
+[`src/state/store.ts`](../src/state/store.ts) writes JSON and JSONL files directly. That is simple and readable, but it also means format changes become compatibility changes very quickly.
 
 ## Suggested Next Improvements
 

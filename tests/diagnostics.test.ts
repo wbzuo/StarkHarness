@@ -18,6 +18,7 @@ test('buildDiagnostics returns complete registry snapshot', () => {
     listWorkers: () => [{ agentId: 'agent-1', status: 'running' }],
     inbox: { stats: () => ({ totalQueued: 2, pendingResponses: 1, agents: { 'agent-1': { queued: 2 } } }) },
     skills: { listDiscovered: () => [{ name: 'review', description: 'code review' }] },
+    webAccess: { available: true, skillDir: '/tmp/skills/web-access', proxyUrl: 'http://127.0.0.1:3456' },
     permissions: { snapshot: () => ({ read: 'allow', write: 'ask' }) },
     pluginDiagnostics: { commandConflicts: [], toolConflicts: [] },
     session: { id: 'sh-abc123' },
@@ -34,6 +35,7 @@ test('buildDiagnostics returns complete registry snapshot', () => {
   assert.equal(diag.workers.length, 1);
   assert.equal(diag.mailbox.pendingResponses, 1);
   assert.equal(diag.skills.length, 1);
+  assert.equal(diag.webAccess.available, true);
   assert.equal(diag.policy.read, 'allow');
   assert.equal(diag.conflicts.commands.length, 0);
 });
@@ -55,6 +57,7 @@ test('buildDiagnostics handles missing optional registries gracefully', () => {
   const diag = buildDiagnostics(minRuntime);
   assert.equal(diag.tools.length, 0);
   assert.equal(diag.skills.length, 0);
+  assert.equal(diag.webAccess, null);
   assert.equal(diag.mailbox.totalQueued, 0);
   assert.deepEqual(diag.hooks.handlers, []);
 });

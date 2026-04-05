@@ -70,6 +70,8 @@ The runtime combines built-in tools with protocol-driven extension points:
 - **Built-in Workspace Tools**: File IO, search, shell, delegation, and task primitives ship by default.
 - **MCP Tool Injection**: Remote MCP tools are registered dynamically as namespaced StarkHarness tools.
 - **JSON Schema Registry**: The tool surface is exported in schema form for the agent loop and external clients.
+- **Filesystem Hooks**: Startup auto-discovers hook modules from `.starkharness/hooks/` and project-level `hooks/`.
+- **Bundled Web Access Skill**: A vendored `skills/web-access` pack adds structured network strategy, Chrome CDP automation helpers, and reusable site knowledge as a first-class built-in skill.
 
 ### 📡 4. Streaming Bridge And Live Providers (`src/bridge/`, `src/providers/`)
 Real-time execution is already a first-class concern:
@@ -89,21 +91,31 @@ Real-time execution is already a first-class concern:
 | `edit_file` | `write` | **Global Replace**: `replace_all: true` for bulk updates. |
 | `shell` | `exec` | **Safe Execution**: `/bin/sh -c` with 120s timeout and 4MB buffer. |
 | `fetch_url` | `network` | **Remote Context**: Fetch HTTP content directly into the runtime. |
+| `browser_open` | `network` | **CDP Tab Control**: Open URLs in Chrome through the bundled web-access proxy. |
+| `browser_eval` | `network` | **Browser Extraction**: Evaluate JavaScript against a live browser target. |
+| `web_site_context` | `read` | **Site Knowledge**: Load bundled site-pattern guidance for known domains. |
 | `spawn_agent` | `delegate` | **Orchestrated**: Create sub-agents with specific role whitelists. |
 
 MCP tools are not a single hardcoded builtin. They are loaded dynamically and exposed with names like `mcp__server__tool`.
+
+The bundled browser/web suite currently includes:
+
+- `browser_targets`, `browser_open`, `browser_eval`
+- `browser_click`, `browser_scroll`, `browser_screenshot`, `browser_close`
+- `web_site_context`
 
 ---
 
 ## 🚦 CLI Command Reference
 
-Execute commands via `node src/main.js <command>`.
+Execute commands via `node --import tsx src/main.ts <command>`.
 
 | Command | Purpose |
 | :--- | :--- |
 | `blueprint` | **Runtime Blueprint**: Print the assembled runtime surface and active capabilities. |
 | `registry` | **Full Diagnostic**: Lists all tools, commands, providers, and plugin conflicts. |
 | `doctor` | **Health Check**: Validates harness wiring and system surfaces. |
+| `web-access-status` | **Browser/Web Status**: Show bundled `web-access` availability, scripts, and proxy endpoint details. |
 | `run` | **Agent Loop**: Execute a full provider-backed agent run for a prompt. |
 | `repl` / `chat` | **Interactive Mode**: Start the readline-based local REPL. |
 | `serve` | **Bridge Mode**: Start the HTTP, SSE, and WebSocket bridge. |
@@ -129,6 +141,7 @@ src/
 ├── tasks/           # Scheduler and task state machine
 ├── memory/          # CLAUDE.md + Dynamic learned context
 ├── skills/          # Skill discovery and runtime prompt binding
+├── web-access/      # Bundled browser/CDP integration helpers for web-access
 ├── state/           # Session, agent, and worker persistence
 ├── ui/              # REPL surface
 └── telemetry/       # Event logging and distributed trace (traces.jsonl)
@@ -139,7 +152,7 @@ src/
 ## 🧭 Current Maturity
 
 - **Already solid**: runtime assembly, multi-turn execution, mailbox-driven multi-agent orchestration, bridge authz, persistence, telemetry, and replay-oriented diagnostics.
-- **Partially implemented**: MCP beyond tool loading, Docker isolation, and the richer TUI described in the roadmap.
+- **Partially implemented**: MCP beyond tool loading, higher-level web strategy beyond the current browser primitives, Docker isolation, and the richer TUI described in the roadmap.
 - **Still early**: the package is `0.1.0`, remains `private`, and the repository does not yet ship a root `LICENSE` file.
 
 For a grounded walkthrough of these tradeoffs, start with the [Architecture Deep Dive](./docs/architecture-deep-dive.md) and the [Contributor Guide](./docs/contributor-guide.md).
