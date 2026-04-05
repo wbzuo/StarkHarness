@@ -4,7 +4,7 @@
   <img src="https://img.shields.io/badge/Node.js-20+-green.svg" alt="Node.js Version">
   <img src="https://img.shields.io/badge/Dependencies-Zero-blue.svg" alt="Zero Dependencies">
   <img src="https://img.shields.io/badge/Tests-145%20Passed-brightgreen.svg" alt="Tests">
-  <img src="https://img.shields.io/badge/Security-Token%20Gated-blue.svg" alt="Security">
+  <img src="https://img.shields.io/badge/Security-Multi--Tenant%20Authz-blue.svg" alt="Security">
 </p>
 
 ---
@@ -44,7 +44,7 @@ StarkHarness orchestrates a complex flow of data across five specialized planes,
 
 ---
 
-## 💎 Advanced Key Features
+## 💎 Pro-Grade Features
 
 ### 🤖 1. Multi-Agent Orchestration (`src/agents/`)
 Built-in support for hierarchical agent swarms:
@@ -52,20 +52,21 @@ Built-in support for hierarchical agent swarms:
 - **`Inbox`**: Implements an asynchronous message bus for inter-agent communication.
 - **`Executor`**: Runs dangerous or specialized turns in isolated sub-runtimes.
 
-### 🔌 2. Secure Bridge & WebSocket (`src/bridge/`)
-Production-ready communication layer:
-- **Auth Token Gate**: Optional security via `Authorization: Bearer` (HTTP) or `?token=` (WS).
-- **WS Subscription Model**: Topic-based (e.g., `runs`) pub/sub system for real-time agent monitoring.
-- **Streaming Context**: Full support for Server-Sent Events (SSE) and WebSocket streams.
+### 🛡️ 2. Multi-Tenant Authz (`src/bridge/`)
+Beyond simple authentication, StarkHarness implements **Token-to-Profile** mapping:
+- **`tokenProfiles`**: Map different API keys to specific sandbox profiles.
+- **Contextual Isolation**: Each request uses its own `PermissionEngine` instance, ensuring that a "Viewer" token cannot escalate to "Admin" capabilities.
+- **Secure Bridge**: Auth via `Authorization: Bearer` (HTTP) or `?token=` (WS).
 
-### 🛡️ 3. Execution Sandbox (`src/runtime/sandbox.js`)
-Move beyond simple permission checks:
+### 🔌 3. Fine-Grained Subscriptions (`src/bridge/ws`)
+Real-time monitoring with precision:
+- **Filters**: Subscribe to specific `traceId` or `agentId` to filter out background noise.
+- **Topic-Based**: Group events by `runs`, `logs`, or `system`.
+- **Live Context**: Streamed `tool_use` events with full trace ancestry.
+
+### 🛡️ 4. Execution Sandbox (`src/runtime/sandbox.js`)
 - **Physical Isolation**: Optional environment isolation for `shell` and `exec` commands.
-- **Tool-Level Sandboxing**: Configurable resource limits (CPU, Memory, Time) per tool call.
-
-### 📡 4. CLI Power Modes (`src/main.js`)
-- **Pipe Mode**: Optimized for non-blocking CI/CD and script automation.
-- **JSON REPL**: Machine-readable interactive mode (`--json=true`) for IDE integration.
+- **Resource Limits**: Hard caps on CPU, Memory, and Time per tool call.
 
 ---
 
@@ -117,7 +118,7 @@ src/
 ## 🗺 Roadmap
 
 - [x] **Live Providers**: Native streaming for Anthropic & OpenAI.
-- [x] **Secure Bridge**: Auth Token Gate and WebSocket Subscription model.
+- [x] **Secure Bridge**: Authz Profiles and WebSocket Subscription filters.
 - [x] **Multi-Agent**: Orchestration and inter-agent message bus.
 - [ ] **Phase 1**: Full MCP 1.0 specification (Resources & Prompts).
 - [ ] **Phase 2**: TUI / REPL with syntax highlighting and multi-session tabs.
@@ -127,4 +128,4 @@ src/
 
 ## 📄 License
 
-MIT. Designed for researchers and engineers building the next generation of AI agents.
+MIT. Designed for researchers and engineers exploring the boundaries of AI agent runtimes.
