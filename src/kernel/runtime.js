@@ -220,9 +220,9 @@ export async function createRuntime(options = {}) {
     async log(eventName, payload) {
       return this.telemetry.emit(eventName, payload, this.trace);
     },
-    async dispatchTurn(turn) {
+    async dispatchTurn(turn, options = {}) {
       await this.log('turn:start', turn);
-      const result = await this.loop.executeTurn(turn);
+      const result = await this.loop.executeTurn(turn, options);
       if (result.ok) {
         this.session.turns.push({ turn, result, recordedAt: new Date().toISOString() });
         await this.persist();
@@ -260,7 +260,8 @@ export async function createRuntime(options = {}) {
       const result = await this.runner.run({
         userMessage,
         systemPrompt: effectiveSystemPrompt,
-        onTextChunk: options.onTextChunk,
+        onTextChunk: (chunk) => options.onTextChunk?.(chunk, { traceId: trace.traceId }),
+        permissions: options.permissions,
       });
       // Persist each tool turn back into the session
       for (const turn of result.turns) {

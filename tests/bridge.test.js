@@ -353,3 +353,99 @@ test('HTTP bridge enforces optional auth token on HTTP and websocket routes', as
     await closeBridge(ctx);
   }
 });
+
+test('HTTP bridge supports token-to-profile mapping (Authz)', async () => {
+  const ctx = await makeBridge({
+    tokenProfiles: {
+      'admin-token': 'permissive',
+      'viewer-token': 'locked',
+    },
+  });
+  try {
+    // Admin token should allow shell execution
+    const adminRes = await fetch(`${ctx.bridge.url}/run`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer admin-token',
+      },
+      body: JSON.stringify({ prompt: 'run shell echo hello' }),
+    });
+    const adminBody = await adminRes.json();
+    // We don't need it to actually succeed at execution (requires LLM),
+    // but the contextual permissions passed to runtime.run should match 'permissive'.
+    // We can verify this by checking if the trace log for the turn uses 'permissive' policy.
+
+    // Viewer token should immediately deny via locked profile if we try a restricted command directly
+    const viewerRes = await fetch(`${ctx.bridge.url}/command/doctor`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer viewer-token',
+      },
+      body: JSON.stringify({}),
+    });
+    const viewerBody = await viewerRes.json();
+    // Profile 'locked' should be visible in the doctor response if we passed it correctly
+    assert.equal(viewerBody.policy.write, 'deny');
+    assert.equal(viewerBody.policy.exec, 'deny');
+
+    const adminDoctorRes = await fetch(`${ctx.bridge.url}/command/doctor`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer admin-token',
+      },
+      body: JSON.stringify({}),
+    });
+    const adminDoctorBody = await adminDoctorRes.json();
+    assert.equal(adminDoctorBody.policy.write, 'allow');
+    assert.equal(adminDoctorBody.policy.exec, 'allow');
+
+  } finally {
+    await closeBridge(ctx);
+  }
+});
+
+test('HTTP bridge supports fine-grained WebSocket filtering by traceId', async () => {
+  const ctx = await makeBridge();
+  try {
+    const subscriber = await connectWs(ctx.bridge.wsUrl);
+    await subscriber.nextMessage(); // connected
+
+    // First run to get a traceId
+    const run1 = await fetch(`${ctx.bridge.url}/run`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prompt: 'first run' }),
+    });
+    const { traceId: traceId1 } = await run1.json();
+
+    // Subscribe ONLY to traceId1
+    subscriber.send({ type: 'subscribe', topics: ['runs'], filters: { traceId: traceId1 } });
+    await subscriber.nextMessageOfType('subscribed');
+
+    // Second run (different trace)
+    const run2 = await fetch(`${ctx.bridge.url}/run`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prompt: 'second run' }),
+    });
+    const { traceId: traceId2 } = await run2.json();
+
+    // Check that we did NOT receive chunks from traceId2
+    const eventResult = await Promise.race([
+      subscriber.nextMessage(100).then(() => 'message').catch(() => 'timeout'),
+      new Promise((resolve) => setTimeout(() => resolve('timeout'), 150)),
+    ]);
+    assert.equal(eventResult, 'timeout');
+
+    // Trigger another event for traceId1 (mocked or re-run)
+    // For this test, we just verify the isolation. 
+    // In a real scenario, we might have concurrent agents.
+
+    subscriber.close();
+  } finally {
+    await closeBridge(ctx);
+  }
+});

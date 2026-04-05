@@ -6,13 +6,15 @@ export class AgentLoop {
     this.turnLog = [];
   }
 
-  async executeTurn(turn) {
+  async executeTurn(turn, options = {}) {
     const { tool: toolName, input = {} } = turn;
     const tool = this.tools.get(toolName);
     if (!tool) return { ok: false, reason: 'unknown-tool', tool: toolName };
 
+    const permissions = options.permissions ?? this.permissions;
+
     // 1. Permission check
-    const gate = this.permissions.evaluate({ capability: tool.capability, toolName: tool.name });
+    const gate = permissions.evaluate({ capability: tool.capability, toolName: tool.name });
     if (gate.decision === 'deny') return { ok: false, reason: 'permission-denied', tool: toolName, gate };
     if (gate.decision === 'ask') return { ok: false, reason: 'permission-escalation-required', tool: toolName, gate };
 

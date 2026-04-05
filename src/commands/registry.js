@@ -366,6 +366,19 @@ export class CommandRegistry {
   async dispatch(name, runtime, args = {}) {
     const command = this.get(name);
     if (!command) throw new Error(`Unknown command: ${name}`);
-    return command.execute(runtime, args);
+
+    // Contextual runtime with permissions override
+    let effectiveRuntime = runtime;
+    if (args.permissions) {
+      effectiveRuntime = new Proxy(runtime, {
+        get(target, prop) {
+          if (prop === 'permissions') return args.permissions;
+          const value = target[prop];
+          return typeof value === 'function' ? value.bind(target) : value;
+        },
+      });
+    }
+
+    return command.execute(effectiveRuntime, args);
   }
 }

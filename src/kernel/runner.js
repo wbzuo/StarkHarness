@@ -22,7 +22,7 @@ export class AgentRunner {
     this.maxTurns = maxTurns;
   }
 
-  async run({ userMessage, systemPrompt, toolSchemas, onTextChunk, compactThreshold = DEFAULT_COMPACT_THRESHOLD }) {
+  async run({ userMessage, systemPrompt, toolSchemas, onTextChunk, compactThreshold = DEFAULT_COMPACT_THRESHOLD, permissions }) {
     let messages = [{ role: 'user', content: userMessage }];
     const schemas = toolSchemas ?? this.tools.toSchemaList();
     const turns = [];
@@ -31,6 +31,7 @@ export class AgentRunner {
     let totalUsage = { input_tokens: 0, output_tokens: 0 };
     let compactions = 0;
     const maxApiCalls = Math.max(1, this.maxTurns + 1);
+    const effectivePermissions = permissions ?? this.permissions;
 
     for (let i = 0; i < maxApiCalls; i++) {
       // Auto-compact when messages grow beyond threshold
@@ -85,7 +86,7 @@ export class AgentRunner {
       }
       const toolResults = [];
       for (const tc of toolCallsToExecute) {
-        const turnResult = await this.#executeTool(tc);
+        const turnResult = await this.#executeTool(tc, effectivePermissions);
         turns.push({ toolName: tc.name, toolId: tc.id, input: tc.input, result: turnResult });
         toolResults.push({
           type: 'tool_result',
@@ -108,12 +109,12 @@ export class AgentRunner {
     return { finalText, turns, messages, stopReason, stopHook: stopResult.decision, usage: totalUsage, compactions };
   }
 
-  async #executeTool(toolCall) {
+  async #executeTool(toolCall, permissions) {
     const tool = this.tools.get(toolCall.name);
     if (!tool) return { ok: false, reason: 'unknown-tool', tool: toolCall.name };
 
     // Permission check
-    const gate = this.permissions.evaluate({ capability: tool.capability, toolName: tool.name });
+    const gate = permissions.evaluate({ capability: tool.capability, toolName: tool.name });
     if (gate.decision === 'deny') return { ok: false, reason: 'permission-denied', tool: toolCall.name, gate };
     if (gate.decision === 'ask') return { ok: false, reason: 'permission-escalation-required', tool: toolCall.name, gate };
 
