@@ -1,0 +1,10 @@
+services:
+  starkharness:
+    build: .
+    ports:
+      - "3000:3000"
+    env_file:
+      - .env
+    volumes:
+      - .:/app
+    command: ["node", "--import", "tsx", "src/main.ts", "serve", "--port=3000", "--host=0.0.0.0"]

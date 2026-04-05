@@ -1,0 +1,26 @@
+{
+  "name": "workflow-automation-app",
+  "description": "A starter app for local workflow automation and repeatable repo tasks.",
+  "version": "0.1.0",
+  "paths": {
+    "commandsDir": "commands",
+    "skillsDir": "skills",
+    "hooksDir": "hooks",
+    "policyPath": "config/policy.json",
+    "providerConfigPath": "config/providers.json",
+    "pluginManifestPath": "plugins/browser-pack.json",
+    "envPath": ".env"
+  },
+  "startup": {
+    "mode": "serve",
+    "host": "127.0.0.1",
+    "port": 3000
+  },
+  "automation": {
+    "defaultPrompt": "Inspect this workspace, identify the highest-value repeatable automation opportunity, and summarize the next runbook step.",
+    "streamOutput": true
+  },
+  "features": {
+    "webAccess": true
+  }
+}
