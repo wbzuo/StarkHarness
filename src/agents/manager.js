@@ -51,11 +51,12 @@ export class AgentManager {
     return this.#agents.get(id);
   }
 
-  matchAgent(query) {
+  matchAgent(query, candidates = null) {
     const lower = query.toLowerCase();
     let best = null;
     let bestScore = 0;
-    for (const agent of this.#agents.values()) {
+    const pool = Array.isArray(candidates) ? candidates : this.#agents.values();
+    for (const agent of pool) {
       const desc = (agent.description + ' ' + agent.role).toLowerCase();
       const words = lower.split(/\s+/);
       const score = words.filter((w) => desc.includes(w) && w.length > 2).length;

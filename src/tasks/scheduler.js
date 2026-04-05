@@ -12,15 +12,17 @@ function detectCycles(tasks) {
   const visited = new Set();
   const cyclic = new Set();
 
-  function dfs(node) {
-    if (visited.has(node)) return;
+  function dfs(node, trail = []) {
     if (visiting.has(node)) {
+      const cycleStart = trail.indexOf(node);
+      for (const member of trail.slice(cycleStart)) cyclic.add(member);
       cyclic.add(node);
       return;
     }
+    if (visited.has(node)) return;
     visiting.add(node);
     for (const dep of graph.get(node) ?? []) {
-      if (graph.has(dep)) dfs(dep);
+      if (graph.has(dep)) dfs(dep, [...trail, node]);
     }
     visiting.delete(node);
     visited.add(node);
@@ -60,13 +62,28 @@ export class TaskScheduler {
     return all.filter((task) => cyclic.has(task.id)).map((task) => ({ ...task, blockedReason: 'dependency-cycle' }));
   }
 
-  selectAgent(task, { excludeAgentIds = new Set() } = {}) {
-    if (task.owner && !excludeAgentIds.has(task.owner)) return this.agents.get(task.owner) ?? null;
-    const idle = this.agents.listByStatus('idle').filter((agent) => !excludeAgentIds.has(agent.id));
+  selectAgent(task, { excludeAgentIds = new Set(), preferredAgents = null, maxInboxSize = Infinity, inbox = null } = {}) {
+    if (task.owner && !excludeAgentIds.has(task.owner)) {
+      const owned = this.agents.get(task.owner) ?? null;
+      if (!owned) return null;
+      if (owned.status !== 'idle') return null;
+      if (inbox && inbox.count(owned.id) >= maxInboxSize) return null;
+      return owned;
+    }
+    const candidatePool = Array.isArray(preferredAgents)
+      ? preferredAgents
+      : this.agents.listByStatus('idle');
+    const idle = candidatePool.filter((agent) => {
+      if (excludeAgentIds.has(agent.id)) return false;
+      if (agent.status !== 'idle') return false;
+      if (inbox && inbox.count(agent.id) >= maxInboxSize) return false;
+      return true;
+    });
     if (idle.length === 0) return null;
     if (task.role) return idle.find((agent) => agent.role === task.role) ?? idle[0];
     if (task.subject || task.description) {
-      return this.agents.matchAgent(`${task.subject ?? ''} ${task.description ?? ''}`) ?? idle[0];
+      const ranked = this.agents.matchAgent(`${task.subject ?? ''} ${task.description ?? ''}`, idle);
+      return ranked ?? idle[0];
     }
     return idle[0];
   }

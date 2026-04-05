@@ -227,6 +227,8 @@ export function createBuiltinTools() {
           correlationId: { type: 'string', description: 'RPC correlation id' },
           replyTo: { type: 'string', description: 'Reply target agent id' },
           expectReply: { type: 'boolean', description: 'Whether a request expects a response' },
+          awaitReply: { type: 'boolean', description: 'Wait for a response when sending a request' },
+          timeoutMs: { type: 'number', description: 'Timeout for awaitReply in milliseconds' },
           payload: { type: 'object', description: 'Structured payload' },
         },
         required: ['to', 'body'],
@@ -238,6 +240,10 @@ export function createBuiltinTools() {
           ? runtime.inbox.request(input.to, base)
           : runtime.inbox.send(input.to, base);
         await runtime.persist();
+        if (input.kind === 'request' && input.awaitReply === true) {
+          const response = await runtime.awaitResponse(base.from, routed.correlationId, { timeoutMs: input.timeoutMs });
+          return { ok: true, tool: 'send_message', message: routed, response };
+        }
         return { ok: true, tool: 'send_message', message: routed };
       },
     }),
@@ -265,7 +271,17 @@ export function createBuiltinTools() {
             task = runtime.tasks.update(input.id, input.patch ?? {});
             break;
           case 'dispatch':
-            return { ok: true, tool: 'tasks', results: await runtime.orchestrator.runReadyTasks({ parallel: input.parallel !== false, concurrency: input.concurrency ?? Infinity, timeoutMs: input.timeoutMs }), tasks: runtime.tasks.list() };
+            return {
+              ok: true,
+              tool: 'tasks',
+              results: await runtime.orchestrator.runReadyTasks({
+                parallel: input.parallel !== false,
+                concurrency: input.concurrency ?? Infinity,
+                timeoutMs: input.timeoutMs,
+                maxInboxSize: input.maxInboxSize ?? Infinity,
+              }),
+              tasks: runtime.tasks.list(),
+            };
           default:
             return { ok: true, tool: 'tasks', tasks: runtime.tasks.list() };
         }

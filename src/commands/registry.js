@@ -135,6 +135,7 @@ export function createCommandRegistry() {
           parallel: args.parallel !== 'false',
           concurrency: args.concurrency ? Number(args.concurrency) : Infinity,
           timeoutMs: args.timeoutMs ? Number(args.timeoutMs) : undefined,
+          maxInboxSize: args.maxInboxSize ? Number(args.maxInboxSize) : Infinity,
         });
       },
     },
@@ -168,6 +169,8 @@ export function createCommandRegistry() {
           pollIntervalMs: Number(args.pollIntervalMs ?? 50),
           maxMessagesPerTick: Number(args.maxMessagesPerTick ?? 1),
           timeoutMs: Number(args.timeoutMs ?? 120000),
+          maxRestarts: Number(args.maxRestarts ?? 0),
+          restartDelayMs: Number(args.restartDelayMs ?? 50),
         });
       },
     },

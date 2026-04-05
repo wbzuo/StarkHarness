@@ -230,7 +230,7 @@ export async function createRuntime(options = {}) {
       await this.log('command:complete', { name, args, result });
       return result;
     },
-    async run(userMessage) {
+    async run(userMessage, options = {}) {
       await this.log('run:start', { userMessage });
       const discovered = this.skills.listDiscovered();
       const skillMap = new Map(discovered.map((skill) => [skill.dir, skill]));
@@ -252,6 +252,7 @@ export async function createRuntime(options = {}) {
       const result = await this.runner.run({
         userMessage,
         systemPrompt: effectiveSystemPrompt,
+        onTextChunk: options.onTextChunk,
       });
       // Persist each tool turn back into the session
       for (const turn of result.turns) {
@@ -275,6 +276,9 @@ export async function createRuntime(options = {}) {
     },
     async stopWorker(agentId) {
       return this.orchestrator.stopWorker(agentId);
+    },
+    awaitResponse(agentId, correlationId, options = {}) {
+      return this.inbox.awaitResponse(agentId, correlationId, options);
     },
     listWorkers() {
       return this.orchestrator.listWorkers();

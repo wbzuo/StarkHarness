@@ -1,13 +1,15 @@
 export class AgentInbox {
   #messages = new Map();
   #counters = new Map();
+  #pending = new Map();
 
   constructor(initialState = {}) {
     const state = initialState.messages ? initialState : { messages: initialState, counters: {} };
     for (const [agentId, messages] of Object.entries(state.messages ?? {})) {
-      this.#messages.set(agentId, [...messages]);
+      const safeMessages = Array.isArray(messages) ? messages : [];
+      this.#messages.set(agentId, [...safeMessages]);
       const explicit = Number(state.counters?.[agentId] ?? 0);
-      const inferred = messages.reduce((max, message) => {
+      const inferred = safeMessages.reduce((max, message) => {
         const match = String(message.id ?? '').match(/(\d+)$/);
         return Math.max(max, match ? Number(match[1]) : 0);
       }, 0);
@@ -47,6 +49,15 @@ export class AgentInbox {
       inReplyTo: message.inReplyTo ?? null,
     };
     inbox.push(envelope);
+    if (kind === 'response' && envelope.correlationId) {
+      const key = this.#pendingKey(agentId, envelope.correlationId);
+      const pending = this.#pending.get(key);
+      if (pending) {
+        this.#pending.delete(key);
+        clearTimeout(pending.timeout);
+        pending.resolve(envelope);
+      }
+    }
     return envelope;
   }
 
@@ -65,6 +76,29 @@ export class AgentInbox {
       expectReply: false,
       status: response.status ?? 'delivered',
     });
+  }
+
+  #pendingKey(agentId, correlationId) {
+    return `${agentId}:${correlationId}`;
+  }
+
+  awaitResponse(agentId, correlationId, { timeoutMs = 120000 } = {}) {
+    const existing = this.findResponse(agentId, correlationId);
+    if (existing) return Promise.resolve(existing);
+    const key = this.#pendingKey(agentId, correlationId);
+    const prior = this.#pending.get(key);
+    if (prior) return prior.promise;
+    const entry = {};
+    const promise = new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        this.#pending.delete(key);
+        reject(new Error(`response-timeout:${correlationId}`));
+      }, timeoutMs);
+      Object.assign(entry, { resolve, reject, timeout });
+    });
+    entry.promise = promise;
+    this.#pending.set(key, entry);
+    return promise;
   }
 
   list(agentId, { kind, correlationId } = {}) {

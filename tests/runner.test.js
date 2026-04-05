@@ -45,6 +45,28 @@ test('AgentRunner executes single text response (no tools)', async () => {
   assert.equal(result.messages.length, 2);
 });
 
+test('AgentRunner streams final text through onTextChunk callback', async () => {
+  const provider = makeMockProvider([
+    { text: 'Hello there', toolCalls: [], stopReason: 'end_turn', usage: {} },
+  ]);
+  const hooks = new HookDispatcher();
+  const tools = new ToolRegistry();
+  const permissions = new PermissionEngine({ read: 'allow' });
+  const chunks = [];
+
+  const runner = new AgentRunner({ provider, hooks, tools, permissions });
+  const result = await runner.run({
+    userMessage: 'Hi',
+    systemPrompt: 'You are helpful.',
+    onTextChunk: async (chunk) => {
+      chunks.push(chunk);
+    },
+  });
+
+  assert.equal(result.finalText, 'Hello there');
+  assert.deepEqual(chunks, ['Hello', ' ', 'there']);
+});
+
 test('AgentRunner executes tool call and loops back', async () => {
   const provider = makeMockProvider([
     {

@@ -2,6 +2,17 @@
 // A single response with N tool_use blocks counts as N turns.
 const DEFAULT_MAX_TURNS = 25;
 
+function tokenizeForStreaming(text) {
+  return String(text).split(/(\s+)/).filter(Boolean);
+}
+
+async function emitTextChunks(onTextChunk, text) {
+  if (typeof onTextChunk !== 'function' || !text) return;
+  for (const chunk of tokenizeForStreaming(text)) {
+    await onTextChunk(chunk);
+  }
+}
+
 export class AgentRunner {
   constructor({ provider, hooks, tools, permissions, maxTurns = DEFAULT_MAX_TURNS }) {
     this.provider = provider;
@@ -11,7 +22,7 @@ export class AgentRunner {
     this.maxTurns = maxTurns;
   }
 
-  async run({ userMessage, systemPrompt, toolSchemas }) {
+  async run({ userMessage, systemPrompt, toolSchemas, onTextChunk }) {
     const messages = [{ role: 'user', content: userMessage }];
     const schemas = toolSchemas ?? this.tools.toSchemaList();
     const turns = [];
@@ -24,10 +35,12 @@ export class AgentRunner {
         systemPrompt,
         messages,
         tools: schemas,
+        onTextChunk,
       });
 
       totalUsage.input_tokens += response.usage?.input_tokens ?? 0;
       totalUsage.output_tokens += response.usage?.output_tokens ?? 0;
+      await emitTextChunks(onTextChunk, response.text);
 
       // Build assistant message content
       const assistantContent = [];

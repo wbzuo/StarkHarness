@@ -35,17 +35,24 @@ export async function startRepl(runtime) {
       if (line === 'exit' || line === 'quit') break;
       try {
         let result;
+        let streamed = false;
         if (line.startsWith('/')) {
           const [command, ...rest] = line.slice(1).split(' ');
           result = await runtime.dispatchCommand(command, { prompt: rest.join(' '), agent: rest[0], id: rest[0] });
         } else {
           output.write('…thinking\n');
-          result = await runtime.run(line);
+          result = await runtime.run(line, {
+            onTextChunk: async (chunk) => {
+              streamed = true;
+              output.write(chunk);
+            },
+          });
+          if (streamed) output.write('\n');
         }
         transcript.push({ line, result });
-        if (typeof result?.finalText === 'string' && result.finalText) {
+        if (typeof result?.finalText === 'string' && result.finalText && !streamed) {
           await streamText(output, result.finalText);
-        } else {
+        } else if (typeof result?.finalText !== 'string' || !result.finalText) {
           output.write(`${formatResult(result)}\n`);
         }
       } catch (error) {

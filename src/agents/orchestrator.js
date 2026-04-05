@@ -26,6 +26,7 @@ async function raceWithControls(taskPromiseFactory, { signal, timeoutMs } = {}) 
 
 export class AgentOrchestrator {
   #workers = new Map();
+  #cursor = 0;
 
   constructor({ agents, tasks, scheduler, executor, inbox }) {
     this.agents = agents;
@@ -35,11 +36,22 @@ export class AgentOrchestrator {
     this.inbox = inbox;
   }
 
+  #orderedIdleAgents() {
+    const idle = this.agents.listByStatus('idle');
+    if (idle.length <= 1) return idle;
+    const start = this.#cursor % idle.length;
+    return [...idle.slice(start), ...idle.slice(0, start)];
+  }
+
+  #advanceCursor(agents = []) {
+    if (agents.length > 0) this.#cursor = (this.#cursor + 1) % agents.length;
+  }
+
   async #runAssignment({ task, agent }, { signal, timeoutMs } = {}) {
     try {
       const result = await raceWithControls(() => this.executor.execute(agent, task), { signal, timeoutMs });
       this.tasks.update(task.id, { status: 'completed', result, completedAt: new Date().toISOString() });
-      this.agents.update(agent.id, { status: 'idle', currentTaskId: null, lastResult: result.finalText ?? '' });
+      this.agents.update(agent.id, { status: 'idle', currentTaskId: null, lastResult: result.finalText ?? '', lastError: null });
       this.inbox.send(agent.id, { from: 'orchestrator', body: `Task ${task.id} completed`, status: 'delivered' });
       return { agentId: agent.id, taskId: task.id, finalText: result.finalText, stopReason: result.stopReason };
     } catch (error) {
@@ -64,17 +76,24 @@ export class AgentOrchestrator {
     }
   }
 
-  async runReadyTasks({ parallel = true, concurrency = Infinity, signal, timeoutMs } = {}) {
+  async runReadyTasks({ parallel = true, concurrency = Infinity, signal, timeoutMs, maxInboxSize = Infinity } = {}) {
     const ready = this.scheduler.listReady();
     const assignments = [];
     const reserved = new Set();
     for (const task of ready) {
-      const agent = this.scheduler.selectAgent(task, { excludeAgentIds: reserved });
+      const preferredAgents = this.#orderedIdleAgents();
+      const agent = this.scheduler.selectAgent(task, {
+        excludeAgentIds: reserved,
+        preferredAgents,
+        maxInboxSize,
+        inbox: this.inbox,
+      });
       if (!agent) continue;
       this.scheduler.assign(task, agent);
       this.agents.update(agent.id, { status: 'running', currentTaskId: task.id });
       reserved.add(agent.id);
       assignments.push({ task, agent });
+      this.#advanceCursor(preferredAgents);
     }
 
     if (!parallel) {
@@ -107,7 +126,7 @@ export class AgentOrchestrator {
     this.agents.update(agent.id, { status: 'running', currentMessageId: message.id });
     try {
       const result = await raceWithControls(() => this.executor.executeMessage(agent, message), controls);
-      this.agents.update(agent.id, { status: 'idle', currentMessageId: null, lastResult: result.finalText ?? '' });
+      this.agents.update(agent.id, { status: 'idle', currentMessageId: null, lastResult: result.finalText ?? '', lastError: null });
       if (message.kind === 'request' && message.expectReply !== false) {
         this.inbox.respond(message, { from: agent.id, body: result.finalText ?? '', payload: result });
       }
@@ -122,23 +141,70 @@ export class AgentOrchestrator {
     }
   }
 
-  startWorker(agentId, { pollIntervalMs = 50, maxMessagesPerTick = 1, timeoutMs = 120000 } = {}) {
-    if (this.#workers.has(agentId)) return this.#workers.get(agentId);
-    const controller = new AbortController();
-    const loop = (async () => {
-      while (!controller.signal.aborted) {
-        const messages = this.inbox.consumeWork(agentId, maxMessagesPerTick);
+  #createWorkerLoop(agentId, worker) {
+    return async () => {
+      while (!worker.controller.signal.aborted) {
+        const messages = this.inbox.consumeWork(agentId, worker.maxMessagesPerTick);
         if (messages.length === 0) {
-          await delay(pollIntervalMs, undefined, { ref: false });
+          await delay(worker.pollIntervalMs, undefined, { ref: false });
           continue;
         }
         for (const message of messages) {
-          if (controller.signal.aborted) break;
-          await this.processInboxMessage(agentId, message, { signal: controller.signal, timeoutMs });
+          if (worker.controller.signal.aborted) break;
+          await this.processInboxMessage(agentId, message, { signal: worker.controller.signal, timeoutMs: worker.timeoutMs });
         }
       }
-    })();
-    const worker = { agentId, controller, pollIntervalMs, maxMessagesPerTick, timeoutMs, promise: loop };
+    };
+  }
+
+  startWorker(agentId, {
+    pollIntervalMs = 50,
+    maxMessagesPerTick = 1,
+    timeoutMs = 120000,
+    maxRestarts = 0,
+    restartDelayMs = 50,
+  } = {}) {
+    if (this.#workers.has(agentId)) return this.#workers.get(agentId);
+    const worker = {
+      agentId,
+      controller: new AbortController(),
+      pollIntervalMs,
+      maxMessagesPerTick,
+      timeoutMs,
+      maxRestarts,
+      restartDelayMs,
+      restarts: 0,
+      status: 'starting',
+      lastError: null,
+      promise: null,
+    };
+
+    const supervise = async () => {
+      while (!worker.controller.signal.aborted) {
+        try {
+          worker.status = worker.restarts > 0 ? 'restarting' : 'running';
+          await this.#createWorkerLoop(agentId, worker)();
+          worker.status = 'stopped';
+          return;
+        } catch (error) {
+          worker.lastError = error instanceof Error ? error.message : String(error);
+          if (worker.controller.signal.aborted) {
+            worker.status = 'stopped';
+            return;
+          }
+          if (worker.restarts >= worker.maxRestarts) {
+            worker.status = 'failed';
+            throw error;
+          }
+          worker.restarts += 1;
+          worker.status = 'restarting';
+          await delay(worker.restartDelayMs, undefined, { ref: false });
+        }
+      }
+      worker.status = 'stopped';
+    };
+
+    worker.promise = supervise();
     this.#workers.set(agentId, worker);
     return worker;
   }
@@ -153,7 +219,27 @@ export class AgentOrchestrator {
   }
 
   listWorkers() {
-    return [...this.#workers.values()].map(({ agentId, pollIntervalMs, maxMessagesPerTick, timeoutMs }) => ({ agentId, pollIntervalMs, maxMessagesPerTick, timeoutMs }));
+    return [...this.#workers.values()].map(({
+      agentId,
+      pollIntervalMs,
+      maxMessagesPerTick,
+      timeoutMs,
+      maxRestarts,
+      restartDelayMs,
+      restarts,
+      status,
+      lastError,
+    }) => ({
+      agentId,
+      pollIntervalMs,
+      maxMessagesPerTick,
+      timeoutMs,
+      maxRestarts,
+      restartDelayMs,
+      restarts,
+      status,
+      lastError,
+    }));
   }
 
   consumeInbox(agentId, { limit = Infinity } = {}) {
