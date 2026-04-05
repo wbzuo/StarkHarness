@@ -37,7 +37,8 @@ async function main(argv = process.argv.slice(2)) {
   if (command === 'serve') {
     const { createHttpBridge } = await import('./bridge/http.js');
     const port = Number(extraArgs.port ?? 3000);
-    const bridge = await createHttpBridge(runtime, { port });
+    const host = extraArgs.host ?? '127.0.0.1';
+    const bridge = await createHttpBridge(runtime, { port, host });
     console.log(`StarkHarness server listening on ${bridge.url}`);
     console.log(`WebSocket: ${bridge.wsUrl}`);
     console.log(`POST /run { "prompt": "..." } to chat`);

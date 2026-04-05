@@ -6,7 +6,7 @@
 //   // server.close() to shut down
 
 import { createServer } from 'node:http';
-import { randomBytes } from 'node:crypto';
+import { randomBytes, createHash } from 'node:crypto';
 
 function parseBody(req) {
   return new Promise((resolve, reject) => {
@@ -39,7 +39,7 @@ function cors(res) {
 function acceptWebSocket(req, socket, head) {
   const key = req.headers['sec-websocket-key'];
   if (!key) { socket.destroy(); return null; }
-  const hash = require('node:crypto').createHash('sha1')
+  const hash = createHash('sha1')
     .update(key + '258EAFA5-E914-47DA-95CA-5AB5DC85B11C')
     .digest('base64');
   socket.write([
@@ -94,7 +94,13 @@ function encodeWsFrame(data) {
   return Buffer.concat([Buffer.from(header), payload]);
 }
 
-export async function createHttpBridge(runtime, { port = 3000, host = '0.0.0.0' } = {}) {
+function writeSse(res, payload, eventName = null) {
+  if (res.writableEnded) return;
+  if (eventName) res.write(`event: ${eventName}\n`);
+  res.write(`data: ${JSON.stringify(payload)}\n\n`);
+}
+
+export async function createHttpBridge(runtime, { port = 3000, host = '127.0.0.1' } = {}) {
   const wsClients = new Map();
 
   function broadcast(event) {
@@ -153,21 +159,29 @@ export async function createHttpBridge(runtime, { port = 3000, host = '0.0.0.0' 
           'Access-Control-Allow-Origin': '*',
         });
 
-        const result = await runtime.run(prompt, {
-          onTextChunk(chunk) {
-            res.write(`data: ${JSON.stringify({ type: 'chunk', chunk })}\n\n`);
-          },
-        });
+        try {
+          const result = await runtime.run(prompt, {
+            onTextChunk(chunk) {
+              writeSse(res, { type: 'chunk', chunk });
+            },
+          });
 
-        res.write(`data: ${JSON.stringify({
-          type: 'complete',
-          finalText: result.finalText,
-          turns: result.turns?.length ?? 0,
-          stopReason: result.stopReason,
-          usage: result.usage,
-          traceId: result.traceId,
-        })}\n\n`);
-        res.end();
+          writeSse(res, {
+            type: 'complete',
+            finalText: result.finalText,
+            turns: result.turns?.length ?? 0,
+            stopReason: result.stopReason,
+            usage: result.usage,
+            traceId: result.traceId,
+          });
+        } catch (error) {
+          writeSse(res, {
+            type: 'error',
+            error: error instanceof Error ? error.message : String(error),
+          }, 'error');
+        } finally {
+          res.end();
+        }
         return;
       }
 
@@ -199,6 +213,13 @@ export async function createHttpBridge(runtime, { port = 3000, host = '0.0.0.0' 
 
       json(res, { error: 'Not found' }, 404);
     } catch (error) {
+      if (res.headersSent) {
+        if (!res.writableEnded) {
+          writeSse(res, { type: 'error', error: error instanceof Error ? error.message : String(error) }, 'error');
+          res.end();
+        }
+        return;
+      }
       json(res, { error: error instanceof Error ? error.message : String(error) }, 500);
     }
   });
@@ -258,15 +279,21 @@ export async function createHttpBridge(runtime, { port = 3000, host = '0.0.0.0' 
     ws.write(encodeWsFrame(JSON.stringify({ type: 'connected', clientId, sessionId: runtime.session.id })));
   });
 
-  return new Promise((resolve) => {
+  return new Promise((resolve, reject) => {
+    const onError = (error) => {
+      server.off('error', onError);
+      reject(error);
+    };
+    server.once('error', onError);
     server.listen(port, host, () => {
+      server.off('error', onError);
       const addr = server.address();
       resolve({
         server,
         port: addr.port,
         host,
-        url: `http://${host === '0.0.0.0' ? 'localhost' : host}:${addr.port}`,
-        wsUrl: `ws://${host === '0.0.0.0' ? 'localhost' : host}:${addr.port}/ws`,
+        url: `http://${host}:${addr.port}`,
+        wsUrl: `ws://${host}:${addr.port}/ws`,
         clientCount: () => wsClients.size,
         close: () => new Promise((r) => {
           for (const ws of wsClients.values()) try { ws.end(); } catch {}
