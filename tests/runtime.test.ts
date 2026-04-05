@@ -584,6 +584,37 @@ test('web-access-status command reports bundled skill metadata', async () => {
   await runtime.shutdown();
 });
 
+test('auto command uses app automation default prompt when no prompt is provided', async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'starkharness-auto-mode-'));
+  await writeFile(path.join(root, 'starkharness.app.json'), JSON.stringify({
+    name: 'auto-app',
+    automation: {
+      defaultPrompt: 'Summarize this workspace automatically',
+    },
+  }), 'utf8');
+
+  const { loadAppManifest } = await import('../src/app/manifest.js');
+  const app = await loadAppManifest({ cwd: root });
+  const runtime = await createRuntime({
+    app,
+    projectDir: app.rootDir,
+    session: { cwd: app.rootDir, goal: 'auto-mode' },
+  });
+
+  runtime.providers.completeWithStrategy = async () => ({
+    text: 'auto-result',
+    toolCalls: [],
+    stopReason: 'end_turn',
+    usage: {},
+  });
+
+  const result = await runtime.dispatchCommand('auto');
+  assert.equal(result.mode, 'prompt');
+  assert.equal(result.prompt, 'Summarize this workspace automatically');
+  assert.equal(result.finalText, 'auto-result');
+  await runtime.shutdown();
+});
+
 test('completeWithStrategy uses provider capabilities from registered providers', async () => {
   const { ProviderRegistry } = await import('../src/providers/index.js');
   const registry = new ProviderRegistry({});

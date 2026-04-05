@@ -1,0 +1,26 @@
+{
+  "name": "browser-research-app",
+  "description": "A starter app for browser-first research and live web investigation.",
+  "version": "0.1.0",
+  "paths": {
+    "commandsDir": "commands",
+    "skillsDir": "skills",
+    "hooksDir": "hooks",
+    "policyPath": "config/policy.json",
+    "providerConfigPath": "config/providers.json",
+    "pluginManifestPath": "plugins/browser-pack.json",
+    "envPath": ".env"
+  },
+  "startup": {
+    "mode": "serve",
+    "host": "127.0.0.1",
+    "port": 3000
+  },
+  "automation": {
+    "defaultPrompt": "Research the current target topic and produce a concise evidence-backed brief.",
+    "streamOutput": true
+  },
+  "features": {
+    "webAccess": true
+  }
+}

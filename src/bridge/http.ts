@@ -130,6 +130,12 @@ export async function createHttpBridge(runtime, { port = 3000, host = '127.0.0.1
   const wsClients = new Map();
   const { getSandboxProfile } = await import('../permissions/profiles.js');
   const { PermissionEngine } = await import('../permissions/engine.js');
+  const remoteControlEnabled = runtime.env?.bridge?.remoteControl !== false;
+
+  function isRemoteControlPath(pathname) {
+    return pathname.startsWith('/command/')
+      || ['/app', '/blueprint', '/registry', '/doctor', '/web-access', '/env'].includes(pathname);
+  }
 
   function getContextualPermissions(req, url) {
     const token = extractBearerToken(req, url);
@@ -160,6 +166,7 @@ export async function createHttpBridge(runtime, { port = 3000, host = '127.0.0.1
 
     if (req.method === 'OPTIONS') return cors(res);
     if (!isAuthorized(req, url, authToken, tokenProfiles)) return json(res, { error: 'unauthorized' }, 401);
+    if (!remoteControlEnabled && isRemoteControlPath(path)) return json(res, { error: 'remote-control-disabled' }, 403);
 
     const permissions = getContextualPermissions(req, url);
 
@@ -252,6 +259,22 @@ export async function createHttpBridge(runtime, { port = 3000, host = '127.0.0.1
         if (path === '/session') return json(res, runtime.session);
         if (path === '/providers') return json(res, runtime.providers.list());
         if (path === '/tools') return json(res, runtime.tools.list().map(({ name, capability, description }) => ({ name, capability, description })));
+        if (path === '/app') return json(res, runtime.app ?? null);
+        if (path === '/doctor') return json(res, await runtime.dispatchCommand('doctor', { permissions }));
+        if (path === '/registry') return json(res, await runtime.dispatchCommand('registry', { permissions }));
+        if (path === '/blueprint') {
+          const { createBlueprintDocument } = await import('../kernel/runtime.js');
+          return json(res, createBlueprintDocument(runtime));
+        }
+        if (path === '/web-access') return json(res, runtime.webAccess ?? null);
+        if (path === '/env') {
+          return json(res, runtime.env ? {
+            filePath: runtime.env.filePath ?? null,
+            features: runtime.env.features,
+            bridge: runtime.env.bridge,
+            telemetry: runtime.env.telemetry,
+          } : null);
+        }
         if (path === '/agents') return json(res, runtime.agents.list());
         if (path === '/tasks') return json(res, runtime.tasks.list());
         if (path === '/workers') return json(res, runtime.listWorkers());
@@ -287,6 +310,11 @@ export async function createHttpBridge(runtime, { port = 3000, host = '127.0.0.1
     }
     if (!isAuthorized(req, url, authToken, tokenProfiles)) {
       socket.write('HTTP/1.1 401 Unauthorized\r\nConnection: close\r\n\r\n');
+      socket.destroy();
+      return;
+    }
+    if (!remoteControlEnabled) {
+      socket.write('HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n');
       socket.destroy();
       return;
     }

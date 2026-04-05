@@ -21,6 +21,30 @@
 
 - [Architecture Deep Dive](./docs/architecture-deep-dive.md)
 - [Contributor Guide](./docs/contributor-guide.md)
+- [Roadmap](./ROADMAP.md)
+
+---
+
+## ⚡ Quickstart
+
+Initialize a starter app and launch it in development mode:
+
+```bash
+node --import tsx src/main.ts starter-apps
+node --import tsx src/main.ts init --template=browser-research --target=./my-agent
+cd my-agent
+node --import tsx ../src/main.ts doctor --app=./starkharness.app.json
+node --import tsx ../src/main.ts env-status --app=./starkharness.app.json
+node --import tsx ../src/main.ts dev --app=./starkharness.app.json
+```
+
+The one-command path is now:
+
+- `starter-apps`: discover built-in starter app templates
+- `init`: scaffold a runnable app with config, hooks, skills, memory, and deployment files
+- `env-status`: inspect the resolved `.env` / runtime feature configuration
+- `dev`: load an app manifest and start the bridge using app startup defaults
+- `doctor`: inspect runtime, app, and bundled `web-access` readiness
 
 ---
 
@@ -73,7 +97,13 @@ The runtime combines built-in tools with protocol-driven extension points:
 - **Filesystem Hooks**: Startup auto-discovers hook modules from `.starkharness/hooks/` and project-level `hooks/`.
 - **Bundled Web Access Skill**: A vendored `skills/web-access` pack adds structured network strategy, Chrome CDP automation helpers, and reusable site knowledge as a first-class built-in skill.
 
-### 📡 4. Streaming Bridge And Live Providers (`src/bridge/`, `src/providers/`)
+### 🧱 4. App Scaffold + Manifest API (`src/app/`, `starter/`)
+StarkHarness now includes a first-party app layer for downstream agent products:
+- **App Manifest**: `starkharness.app.json` defines startup defaults and app-local paths for commands, skills, hooks, policy, providers, and plugins.
+- **Scaffold Command**: `init` copies a runnable starter app plus deployment templates.
+- **Starter Apps**: Browser research and workflow automation templates are bundled today.
+
+### 📡 5. Streaming Bridge And Live Providers (`src/bridge/`, `src/providers/`)
 Real-time execution is already a first-class concern:
 - **Filters**: Subscribe to specific `traceId` or `agentId` to filter out background noise.
 - **Topic-Based**: Group events by `runs`, `logs`, or `system`.
@@ -115,13 +145,86 @@ Execute commands via `node --import tsx src/main.ts <command>`.
 | `blueprint` | **Runtime Blueprint**: Print the assembled runtime surface and active capabilities. |
 | `registry` | **Full Diagnostic**: Lists all tools, commands, providers, and plugin conflicts. |
 | `doctor` | **Health Check**: Validates harness wiring and system surfaces. |
+| `starter-apps` | **Template Discovery**: List bundled app templates for one-command scaffolding. |
+| `init` | **Scaffold**: Create a runnable app skeleton with starter assets and deployment files. |
+| `app-status` | **App Metadata**: Show the loaded `starkharness.app.json` metadata. |
+| `env-status` | **Env Config**: Show resolved `.env` values, feature switches, and bridge config. |
+| `login-status` | **Provider Login**: Show which provider backends are configured and ready. |
 | `web-access-status` | **Browser/Web Status**: Show bundled `web-access` availability, scripts, and proxy endpoint details. |
+| `auto` | **Auto Mode**: Run the app automation default prompt or command without hand-written CLI choreography. |
 | `run` | **Agent Loop**: Execute a full provider-backed agent run for a prompt. |
 | `repl` / `chat` | **Interactive Mode**: Start the readline-based local REPL. |
-| `serve` | **Bridge Mode**: Start the HTTP, SSE, and WebSocket bridge. |
+| `serve` / `dev` | **Bridge Mode**: Start the HTTP, SSE, and WebSocket bridge, with `dev` honoring app startup defaults. |
 | `smoke-test` | **Quick Verification**: Runs an end-to-end `read_file` turn loop. |
 | `transcript` / `playback` | **Event Log**: Replay or summarize transcript events. |
 | `replay-turn` / `replay-runner` | **Replay Aids**: Reconstruct recorded turn flow and replay plans. |
+
+---
+
+## 📦 App API
+
+An app is defined by a `starkharness.app.json` manifest at the project root.
+
+```json
+{
+  "name": "browser-research-app",
+  "description": "A starter app for browser-first research and live web investigation.",
+  "paths": {
+    "commandsDir": "commands",
+    "skillsDir": "skills",
+    "hooksDir": "hooks",
+    "policyPath": "config/policy.json",
+    "providerConfigPath": "config/providers.json",
+    "pluginManifestPath": "plugins/browser-pack.json"
+  },
+  "startup": {
+    "mode": "serve",
+    "host": "127.0.0.1",
+    "port": 3000
+  },
+  "features": {
+    "webAccess": true
+  }
+}
+```
+
+When loaded through `--app=...`, StarkHarness resolves app-local commands, hooks, skills, provider config, and policy paths automatically.
+
+App-local `.env` files are also recognized through `paths.envPath` or the default `.env` at the app root. The runtime now centralizes bridge, provider, web-access, feature, and telemetry settings through this env layer.
+
+The automation block is used by `auto` mode:
+
+```json
+{
+  "automation": {
+    "defaultPrompt": "Research the current topic and summarize the strongest evidence.",
+    "defaultCommand": "",
+    "streamOutput": true
+  }
+}
+```
+
+---
+
+## 🌉 Remote Control / Bridge
+
+Bridge mode now exposes a broader remote-control surface beyond `/run` and `/stream`.
+
+Key HTTP endpoints include:
+
+- `GET /health`
+- `GET /session`
+- `GET /app`
+- `GET /blueprint`
+- `GET /doctor`
+- `GET /registry`
+- `GET /env`
+- `GET /web-access`
+- `POST /command/:name`
+- `POST /run`
+- `POST /stream`
+
+WebSocket `/ws` continues to support prompt runs, command execution, subscriptions, and filtered event streaming.
 
 ---
 
@@ -129,6 +232,7 @@ Execute commands via `node --import tsx src/main.ts <command>`.
 
 ```text
 src/
+├── app/             # App manifest loading and starter scaffolding
 ├── kernel/          # Runtime composition, turn loop, session, hooks, and prompts
 ├── permissions/     # Permission engine and sandbox profiles
 ├── tools/           # JSON Schema tool definitions (Built-in + MCP)
@@ -145,6 +249,18 @@ src/
 ├── state/           # Session, agent, and worker persistence
 ├── ui/              # REPL surface
 └── telemetry/       # Event logging and distributed trace (traces.jsonl)
+```
+
+Starter app and deployment assets live under:
+
+```text
+starter/
+├── apps/            # Browser research + workflow automation starter apps
+├── deploy/          # Dockerfile, docker-compose, .env.example, .dockerignore
+├── commands/        # Reusable starter slash commands
+├── hooks/           # Reusable starter hooks
+├── skills/          # Reusable starter skills
+└── config/          # Starter policy and provider config
 ```
 
 ---

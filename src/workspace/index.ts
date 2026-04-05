@@ -4,5 +4,8 @@ export function createWorkspaceBlueprint() {
     worktree: 'planned',
     review: 'planned',
     branch: 'planned',
+    app: 'ready',
+    scaffold: 'ready',
+    deploy: 'starter',
   };
 }

@@ -3,6 +3,7 @@ import { createBlueprintDocument } from '../kernel/runtime.js';
 import { listSandboxProfiles } from '../permissions/profiles.js';
 import { createReplayPlan, evaluateReplayPlan } from '../replay/runner.js';
 import { getWebAccessStatus } from '../web-access/index.js';
+import { listStarterApps, scaffoldApp } from '../app/scaffold.js';
 
 function filterTranscript(entries, args = {}) {
   let next = entries;
@@ -66,7 +67,84 @@ export function createCommandRegistry() {
           transcriptPath: runtime.telemetry.transcriptPath,
           plugins: runtime.plugins.list().length,
           sandboxProfiles: listSandboxProfiles(),
+          app: runtime.app,
+          webAccess: runtime.webAccess,
+          env: runtime.env ? {
+            filePath: runtime.env.filePath ?? null,
+            features: runtime.env.features,
+            bridge: runtime.env.bridge,
+          } : null,
         };
+      },
+    },
+    {
+      name: 'starter-apps',
+      description: 'List available starter app templates',
+      async execute() {
+        return listStarterApps();
+      },
+    },
+    {
+      name: 'init',
+      description: 'Scaffold a starter StarkHarness app into a target directory',
+      async execute(_runtime, args = {}) {
+        return scaffoldApp({
+          targetDir: args.target ?? '.',
+          template: args.template ?? 'browser-research',
+          force: args.force === 'true',
+        });
+      },
+    },
+    {
+      name: 'app-status',
+      description: 'Show the currently loaded app manifest metadata',
+      async execute(runtime) {
+        return runtime.app ?? null;
+      },
+    },
+    {
+      name: 'env-status',
+      description: 'Show loaded environment configuration and feature switches',
+      async execute(runtime) {
+        return runtime.env ? {
+          filePath: runtime.env.filePath ?? null,
+          features: runtime.env.features,
+          bridge: runtime.env.bridge,
+          telemetry: runtime.env.telemetry,
+          providers: Object.fromEntries(
+            Object.entries(runtime.env.providers).map(([providerId, provider]) => [
+              providerId,
+              {
+                configured: Boolean(provider.apiKey),
+                baseUrl: provider.baseUrl ?? null,
+                model: provider.model ?? null,
+              },
+            ]),
+          ),
+        } : null;
+      },
+    },
+    {
+      name: 'login-status',
+      description: 'Show provider/login readiness for configured model backends',
+      async execute(runtime) {
+        return runtime.env ? {
+          anthropic: {
+            configured: Boolean(runtime.env.providers.anthropic.apiKey),
+            baseUrl: runtime.env.providers.anthropic.baseUrl ?? null,
+            model: runtime.env.providers.anthropic.model ?? null,
+          },
+          openai: {
+            configured: Boolean(runtime.env.providers.openai.apiKey),
+            baseUrl: runtime.env.providers.openai.baseUrl ?? null,
+            model: runtime.env.providers.openai.model ?? null,
+          },
+          compatible: {
+            configured: Boolean(runtime.env.providers.compatible.apiKey),
+            baseUrl: runtime.env.providers.compatible.baseUrl ?? null,
+            model: runtime.env.providers.compatible.model ?? null,
+          },
+        } : null;
       },
     },
     {
@@ -231,6 +309,39 @@ export function createCommandRegistry() {
           cwd: runtime.context.cwd,
           ensure: args.ensure === 'true',
         });
+      },
+    },
+    {
+      name: 'auto',
+      description: 'Run app-aware auto mode using a prompt, stdin, or app automation defaults',
+      async execute(runtime, args = {}) {
+        let prompt = args.prompt ?? '';
+        if (!prompt && args.stdin) {
+          prompt = args.stdin;
+        }
+        if (!prompt && runtime.app?.automation?.defaultPrompt) {
+          prompt = runtime.app.automation.defaultPrompt;
+        }
+        if (prompt) {
+          const result = await runtime.run(prompt);
+          return {
+            mode: 'prompt',
+            prompt,
+            finalText: result.finalText,
+            turns: result.turns.length,
+            stopReason: result.stopReason,
+            usage: result.usage,
+          };
+        }
+        if (runtime.app?.automation?.defaultCommand) {
+          const result = await runtime.dispatchCommand(runtime.app.automation.defaultCommand, args);
+          return {
+            mode: 'command',
+            command: runtime.app.automation.defaultCommand,
+            result,
+          };
+        }
+        throw new Error('Auto mode requires --prompt, stdin input, or app.automation.defaultPrompt/defaultCommand');
       },
     },
     {

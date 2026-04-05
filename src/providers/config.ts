@@ -9,3 +9,16 @@ export async function loadProviderConfig(configPath) {
 export function getProviderConfig(config, providerId) {
   return config?.[providerId] ?? {};
 }
+
+export function mergeProviderConfig(base = {}, override = {}) {
+  const providers = new Set([...Object.keys(base), ...Object.keys(override)]);
+  return Object.fromEntries(
+    [...providers].map((providerId) => [
+      providerId,
+      {
+        ...(base?.[providerId] ?? {}),
+        ...(override?.[providerId] ?? {}),
+      },
+    ]),
+  );
+}

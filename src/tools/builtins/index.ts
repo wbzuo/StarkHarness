@@ -156,6 +156,7 @@ export function createBuiltinTools() {
       async execute(input = {}, runtime) {
         const command = input.command ?? 'pwd';
         const timeout = input.timeout ?? 120000;
+        const runtimeEnv = runtime.env?.raw ?? process.env;
         const skillEnv = runtime.context.activeSkill?.dir
           ? {
             CLAUDE_SKILL_DIR: runtime.context.activeSkill.dir,
@@ -164,7 +165,7 @@ export function createBuiltinTools() {
           : {};
         const { stdout, stderr } = await execFileAsync('/bin/sh', ['-c', command], {
           cwd: runtime.context.cwd,
-          env: { ...process.env, ...skillEnv },
+          env: { ...runtimeEnv, ...skillEnv },
           maxBuffer: 4 * 1024 * 1024,
           timeout,
         });
@@ -248,8 +249,8 @@ export function createBuiltinTools() {
         properties: {},
       },
       async execute(_input = {}, runtime) {
-        const skillDir = await ensureWebAccessReady({ cwd: runtime.context.cwd });
-        const result = await callWebAccessProxy('/targets');
+        const skillDir = await ensureWebAccessReady({ cwd: runtime.context.cwd, env: runtime.env?.raw });
+        const result = await callWebAccessProxy('/targets', { env: runtime.env?.raw });
         return { ok: true, tool: 'browser_targets', skillDir, targets: result.data };
       },
     }),
@@ -266,8 +267,8 @@ export function createBuiltinTools() {
         required: ['url'],
       },
       async execute(input = {}, runtime) {
-        const skillDir = await ensureWebAccessReady({ cwd: runtime.context.cwd });
-        const result = await callWebAccessProxy(`/new?url=${encodeURIComponent(input.url)}`);
+        const skillDir = await ensureWebAccessReady({ cwd: runtime.context.cwd, env: runtime.env?.raw });
+        const result = await callWebAccessProxy(`/new?url=${encodeURIComponent(input.url)}`, { env: runtime.env?.raw });
         return { ok: true, tool: 'browser_open', skillDir, target: result.data };
       },
     }),
@@ -285,10 +286,11 @@ export function createBuiltinTools() {
         required: ['target', 'expression'],
       },
       async execute(input = {}, runtime) {
-        const skillDir = await ensureWebAccessReady({ cwd: runtime.context.cwd });
+        const skillDir = await ensureWebAccessReady({ cwd: runtime.context.cwd, env: runtime.env?.raw });
         const result = await callWebAccessProxy(`/eval?target=${encodeURIComponent(input.target)}`, {
           method: 'POST',
           body: input.expression,
+          env: runtime.env?.raw,
         });
         return { ok: true, tool: 'browser_eval', skillDir, result: result.data };
       },
@@ -308,11 +310,12 @@ export function createBuiltinTools() {
         required: ['target', 'selector'],
       },
       async execute(input = {}, runtime) {
-        const skillDir = await ensureWebAccessReady({ cwd: runtime.context.cwd });
+        const skillDir = await ensureWebAccessReady({ cwd: runtime.context.cwd, env: runtime.env?.raw });
         const endpoint = input.mode === 'mouse' ? 'clickAt' : 'click';
         const result = await callWebAccessProxy(`/${endpoint}?target=${encodeURIComponent(input.target)}`, {
           method: 'POST',
           body: input.selector,
+          env: runtime.env?.raw,
         });
         return { ok: true, tool: 'browser_click', skillDir, mode: input.mode ?? 'js', result: result.data };
       },
@@ -332,11 +335,11 @@ export function createBuiltinTools() {
         required: ['target'],
       },
       async execute(input = {}, runtime) {
-        const skillDir = await ensureWebAccessReady({ cwd: runtime.context.cwd });
+        const skillDir = await ensureWebAccessReady({ cwd: runtime.context.cwd, env: runtime.env?.raw });
         const params = new URLSearchParams({ target: input.target });
         if (input.y !== undefined) params.set('y', String(input.y));
         if (input.direction) params.set('direction', input.direction);
-        const result = await callWebAccessProxy(`/scroll?${params.toString()}`);
+        const result = await callWebAccessProxy(`/scroll?${params.toString()}`, { env: runtime.env?.raw });
         return { ok: true, tool: 'browser_scroll', skillDir, result: result.data };
       },
     }),
@@ -354,9 +357,9 @@ export function createBuiltinTools() {
         required: ['target', 'file'],
       },
       async execute(input = {}, runtime) {
-        const skillDir = await ensureWebAccessReady({ cwd: runtime.context.cwd });
+        const skillDir = await ensureWebAccessReady({ cwd: runtime.context.cwd, env: runtime.env?.raw });
         const filePath = path.resolve(runtime.context.cwd, input.file);
-        const result = await callWebAccessProxy(`/screenshot?target=${encodeURIComponent(input.target)}&file=${encodeURIComponent(filePath)}`);
+        const result = await callWebAccessProxy(`/screenshot?target=${encodeURIComponent(input.target)}&file=${encodeURIComponent(filePath)}`, { env: runtime.env?.raw });
         return { ok: true, tool: 'browser_screenshot', skillDir, file: filePath, result: result.data };
       },
     }),
@@ -373,8 +376,8 @@ export function createBuiltinTools() {
         required: ['target'],
       },
       async execute(input = {}, runtime) {
-        const skillDir = await ensureWebAccessReady({ cwd: runtime.context.cwd });
-        const result = await callWebAccessProxy(`/close?target=${encodeURIComponent(input.target)}`);
+        const skillDir = await ensureWebAccessReady({ cwd: runtime.context.cwd, env: runtime.env?.raw });
+        const result = await callWebAccessProxy(`/close?target=${encodeURIComponent(input.target)}`, { env: runtime.env?.raw });
         return { ok: true, tool: 'browser_close', skillDir, result: result.data };
       },
     }),
@@ -391,7 +394,7 @@ export function createBuiltinTools() {
         required: ['query'],
       },
       async execute(input = {}, runtime) {
-        const result = await loadSiteContext(input.query, { cwd: runtime.context.cwd });
+        const result = await loadSiteContext(input.query, { cwd: runtime.context.cwd, env: runtime.env?.raw });
         return { ok: true, tool: 'web_site_context', skillDir: result.skillDir, context: result.context };
       },
     }),

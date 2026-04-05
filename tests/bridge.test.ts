@@ -186,6 +186,40 @@ test('HTTP bridge lists tools', async () => {
   }
 });
 
+test('HTTP bridge exposes app and blueprint endpoints', async () => {
+  const ctx = await makeBridge();
+  try {
+    const appRes = await fetch(`${ctx.bridge.url}/app`);
+    const app = await appRes.json();
+    assert.equal(app, null);
+
+    const blueprintRes = await fetch(`${ctx.bridge.url}/blueprint`);
+    const blueprint = await blueprintRes.json();
+    assert.equal(blueprint.name, 'StarkHarness');
+    assert.ok(Array.isArray(blueprint.commands));
+    assert.ok(Array.isArray(blueprint.tools));
+  } finally {
+    await closeBridge(ctx);
+  }
+});
+
+test('HTTP bridge exposes env and web-access endpoints', async () => {
+  const ctx = await makeBridge();
+  try {
+    const envRes = await fetch(`${ctx.bridge.url}/env`);
+    const envBody = await envRes.json();
+    assert.ok(envBody.features);
+    assert.ok(envBody.bridge);
+
+    const webAccessRes = await fetch(`${ctx.bridge.url}/web-access`);
+    const webAccess = await webAccessRes.json();
+    assert.equal(webAccess.available, true);
+    assert.ok(webAccess.skillDir);
+  } finally {
+    await closeBridge(ctx);
+  }
+});
+
 test('HTTP bridge dispatches command', async () => {
   const ctx = await makeBridge();
   try {

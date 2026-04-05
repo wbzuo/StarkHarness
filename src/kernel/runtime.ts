@@ -14,7 +14,7 @@ import { AgentExecutor } from '../agents/executor.js';
 import { AgentOrchestrator } from '../agents/orchestrator.js';
 import { PluginLoader } from '../plugins/loader.js';
 import { ProviderRegistry, createProviderBlueprint } from '../providers/index.js';
-import { loadProviderConfig } from '../providers/config.js';
+import { loadProviderConfig, mergeProviderConfig } from '../providers/config.js';
 import { ToolRegistry } from '../tools/registry.js';
 import { createBuiltinTools } from '../tools/builtins/index.js';
 import { createCapabilityMap } from '../capabilities/index.js';
@@ -45,7 +45,8 @@ function createSnapshot(runtime) {
 }
 
 export async function createRuntime(options = {}) {
-  const stateDir = options.stateDir ?? path.join(options.session?.cwd ?? process.cwd(), '.starkharness');
+  const projectDir = options.projectDir ?? options.app?.rootDir ?? options.session?.cwd ?? process.cwd();
+  const stateDir = options.stateDir ?? path.join(projectDir, '.starkharness');
   const state = new StateStore({ rootDir: stateDir });
   await state.init();
 
@@ -55,9 +56,19 @@ export async function createRuntime(options = {}) {
   const runtimeSnapshot = options.resumeSessionId
     ? await state.loadRuntimeSnapshot().catch(() => ({ tasks: [], agents: [], inbox: {}, permissions: {}, plugins: [] }))
     : { tasks: [], agents: [], inbox: {}, permissions: {}, plugins: [] };
-  const filePolicy = await loadPolicyFile(options.policyPath, { includeDefaults: false });
-  const loadedProviderConfig = await loadProviderConfig(options.providerConfigPath);
-  const providerConfig = { ...loadedProviderConfig, ...(options.providerConfig ?? {}) };
+  const envConfig = options.envConfig ?? {
+    raw: process.env,
+    providers: {},
+    bridge: {},
+    features: {},
+    telemetry: {},
+  };
+  const filePolicy = await loadPolicyFile(options.policyPath ?? options.app?.paths?.policyPath, { includeDefaults: false });
+  const loadedProviderConfig = await loadProviderConfig(options.providerConfigPath ?? options.app?.paths?.providerConfigPath);
+  const providerConfig = mergeProviderConfig(
+    mergeProviderConfig(loadedProviderConfig, envConfig.providers),
+    options.providerConfig ?? {},
+  );
   const profilePolicy = getSandboxProfile(options.sandboxProfile);
   const policy = mergePolicy(profilePolicy, filePolicy);
 
@@ -83,19 +94,19 @@ export async function createRuntime(options = {}) {
   await telemetry.init();
 
   // Determine session first, then derive cwd from it
-  const session = resumed ?? createSession(options.session);
+  const session = resumed ?? createSession({ cwd: projectDir, ...(options.session ?? {}) });
   const cwd = session.cwd ?? process.cwd();
   const context = createContextEnvelope({ cwd, mode: session.mode });
-  const webAccess = await describeWebAccess({ cwd });
+  const webAccess = await describeWebAccess({ cwd, env: envConfig.raw });
 
   // Memory and skills bind to session.cwd (correct for both new and resumed sessions)
-  const memory = new MemoryManager({ projectDir: cwd });
-  const skills = new SkillLoader(path.join(cwd, 'skills'));
+  const memory = new MemoryManager({ projectDir: projectDir });
+  const skills = new SkillLoader(options.skillsDir ?? options.app?.paths?.skillsDir ?? path.join(projectDir, 'skills'));
   // Auto-discover skills at boot
   await skills.discoverSkills();
 
-  if (options.pluginManifestPath) {
-    await plugins.loadManifestFile(options.pluginManifestPath);
+  if (options.pluginManifestPath ?? options.app?.paths?.pluginManifestPath) {
+    await plugins.loadManifestFile(options.pluginManifestPath ?? options.app?.paths?.pluginManifestPath);
   }
   for (const plugin of options.plugins ?? []) {
     plugins.register(plugin);
@@ -131,8 +142,11 @@ export async function createRuntime(options = {}) {
   const { discoverCommands, wrapFileCommand } = await import('../commands/loader.js');
   const commandDirs = [
     path.join(stateDir, 'commands'),
-    path.join(cwd, 'commands'),
-  ];
+    options.commandDirs?.[0],
+    options.commandDirs?.[1],
+    options.app?.paths?.commandsDir,
+    path.join(projectDir, 'commands'),
+  ].filter(Boolean);
   const fileCommands = await discoverCommands(commandDirs);
   commands.registerMany(fileCommands.map(wrapFileCommand));
 
@@ -144,8 +158,11 @@ export async function createRuntime(options = {}) {
   const { discoverHooks } = await import('./hook-loader.js');
   const hookDirs = [
     path.join(stateDir, 'hooks'),
-    path.join(cwd, 'hooks'),
-  ];
+    options.hookDirs?.[0],
+    options.hookDirs?.[1],
+    options.app?.paths?.hooksDir,
+    path.join(projectDir, 'hooks'),
+  ].filter(Boolean);
   const fileHooks = await discoverHooks(hookDirs);
   for (const hook of fileHooks) {
     hooks.register(hook.event, hook);
@@ -219,6 +236,8 @@ export async function createRuntime(options = {}) {
     bridge: createBridgeBlueprint(),
     ui: createReplBlueprint(),
     webAccess,
+    app: options.app ?? null,
+    env: envConfig,
     scheduler,
     executor: null,
     orchestrator: null,
@@ -357,6 +376,17 @@ export function createBlueprintDocument(runtime) {
     bridge: runtime.bridge,
     ui: runtime.ui,
     webAccess: runtime.webAccess,
+    app: runtime.app,
+    env: runtime.env ? {
+      filePath: runtime.env.filePath ?? null,
+      features: runtime.env.features,
+      bridge: {
+        host: runtime.env.bridge?.host,
+        port: runtime.env.bridge?.port,
+        remoteControl: runtime.env.bridge?.remoteControl,
+      },
+      telemetry: runtime.env.telemetry,
+    } : null,
     orchestration: {
       taskCount: runtime.tasks.list().length,
       agentCount: runtime.agents.list().length,

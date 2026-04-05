@@ -1,5 +1,9 @@
 #!/usr/bin/env node
+import path from 'node:path';
 import { createRuntime } from './kernel/runtime.js';
+import { loadAppManifest } from './app/manifest.js';
+import { listStarterApps, scaffoldApp } from './app/scaffold.js';
+import { loadRuntimeEnv } from './config/env.js';
 
 function parseCommandArgs(argv) {
   const parsed = {};
@@ -20,17 +24,47 @@ async function finalizeCli(runtime, code = 0) {
 }
 
 async function main(argv = process.argv.slice(2)) {
-  const command = argv[0] ?? 'blueprint';
+  const rawCommand = argv[0] ?? null;
   const commandArg = argv[1];
   const extraArgs = parseCommandArgs(argv.slice(1));
 
+  if (rawCommand === 'starter-apps') {
+    console.log(JSON.stringify(await listStarterApps(), null, 2));
+    return;
+  }
+
+  if (rawCommand === 'init') {
+    console.log(JSON.stringify(await scaffoldApp({
+      targetDir: extraArgs.target ?? '.',
+      template: extraArgs.template ?? 'browser-research',
+      force: extraArgs.force === 'true',
+    }), null, 2));
+    return;
+  }
+
+  const app = await loadAppManifest({
+    cwd: process.cwd(),
+    appPath: extraArgs.app ?? null,
+  });
+  const envConfig = await loadRuntimeEnv({
+    cwd: app?.rootDir ?? process.cwd(),
+    envFilePath: extraArgs.env ?? app?.paths?.envPath ?? null,
+  });
+  const command = rawCommand ?? ((app?.startup?.mode === 'auto' || envConfig.features.autoMode) ? 'auto' : 'blueprint');
+
   const runtime = await createRuntime({
-    session: { goal: 'bootstrap StarkHarness', mode: 'interactive' },
+    session: { goal: 'bootstrap StarkHarness', mode: 'interactive', cwd: app?.rootDir ?? process.cwd() },
     resumeSessionId: command === 'resume' ? commandArg : undefined,
-    policyPath: extraArgs.policy,
-    pluginManifestPath: extraArgs.plugin,
+    app,
+    envConfig,
+    projectDir: app?.rootDir ?? process.cwd(),
+    policyPath: extraArgs.policy ?? app?.paths?.policyPath,
+    pluginManifestPath: extraArgs.plugin ?? app?.paths?.pluginManifestPath,
     sandboxProfile: extraArgs.profile,
-    providerConfigPath: extraArgs.providers,
+    providerConfigPath: extraArgs.providers ?? app?.paths?.providerConfigPath,
+    skillsDir: app?.paths?.skillsDir,
+    commandDirs: app?.paths?.commandsDir ? [path.join(app.rootDir, '.starkharness', 'commands'), app.paths.commandsDir] : undefined,
+    hookDirs: app?.paths?.hooksDir ? [path.join(app.rootDir, '.starkharness', 'hooks'), app.paths.hooksDir] : undefined,
   });
 
   // Interactive REPL mode
@@ -41,13 +75,21 @@ async function main(argv = process.argv.slice(2)) {
   }
 
   // HTTP/WebSocket server mode
-  if (command === 'serve') {
+  if (command === 'serve' || command === 'dev') {
     const { createHttpBridge } = await import('./bridge/http.js');
-    const port = Number(extraArgs.port ?? 3000);
-    const host = extraArgs.host ?? '127.0.0.1';
-    const authToken = extraArgs.token ?? process.env.STARKHARNESS_BRIDGE_TOKEN ?? null;
-    const bridge = await createHttpBridge(runtime, { port, host, authToken });
+    const port = Number(extraArgs.port ?? app?.startup?.port ?? envConfig.bridge.port ?? 3000);
+    const host = extraArgs.host ?? app?.startup?.host ?? envConfig.bridge.host ?? '127.0.0.1';
+    const authToken = extraArgs.token ?? envConfig.bridge.authToken ?? null;
+    const bridge = await createHttpBridge(runtime, {
+      port,
+      host,
+      authToken,
+      tokenProfiles: envConfig.bridge.tokenProfiles,
+    });
     console.log(`StarkHarness server listening on ${bridge.url}`);
+    if (app) {
+      console.log(`App: ${app.name} (${app.manifestPath})`);
+    }
     console.log(`WebSocket: ${bridge.wsUrl}`);
     console.log(`POST /run { "prompt": "..." } to chat`);
     console.log(`POST /stream { "prompt": "..." } for SSE streaming`);
@@ -58,6 +100,19 @@ async function main(argv = process.argv.slice(2)) {
       process.exit(0);
     });
     return;
+  }
+
+  if (command === 'auto') {
+    let stdin = '';
+    if (!process.stdin.isTTY) {
+      for await (const chunk of process.stdin) stdin += chunk;
+    }
+    const result = await runtime.dispatchCommand('auto', {
+      ...extraArgs,
+      stdin: stdin.trim(),
+    });
+    console.log(JSON.stringify(result, null, 2));
+    await finalizeCli(runtime, 0);
   }
 
   // Pipe mode: read prompt from stdin

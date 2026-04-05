@@ -14,6 +14,13 @@ export function buildDiagnostics(runtime) {
     mailbox: runtime.inbox?.stats?.() ?? { totalQueued: 0, pendingResponses: 0, agents: {} },
     skills: runtime.skills?.listDiscovered?.() ?? [],
     webAccess: runtime.webAccess ?? null,
+    app: runtime.app ?? null,
+    env: runtime.env ? {
+      filePath: runtime.env.filePath ?? null,
+      features: runtime.env.features,
+      bridge: runtime.env.bridge,
+      telemetry: runtime.env.telemetry,
+    } : null,
     policy: runtime.permissions.snapshot(),
     conflicts: {
       commands: runtime.pluginDiagnostics.commandConflicts,
