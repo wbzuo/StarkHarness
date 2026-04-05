@@ -53,9 +53,9 @@ export class AgentOrchestrator {
     if (agents.length > 0) this.#cursor = (this.#cursor + 1) % agents.length;
   }
 
-  async #runAssignment({ task, agent }, { signal, timeoutMs } = {}) {
+  async #runAssignment({ task, agent }, { signal, timeoutMs, onTextChunk } = {}) {
     try {
-      const result = await raceWithControls(() => this.executor.execute(agent, task), { signal, timeoutMs });
+      const result = await raceWithControls(() => this.executor.execute(agent, task, { onTextChunk }), { signal, timeoutMs });
       this.tasks.update(task.id, { status: 'completed', result, completedAt: new Date().toISOString() });
       this.agents.update(agent.id, { status: 'idle', currentTaskId: null, lastResult: result.finalText ?? '', lastError: null });
       this.inbox.send(agent.id, { from: 'orchestrator', body: `Task ${task.id} completed`, status: 'delivered' });
@@ -82,7 +82,7 @@ export class AgentOrchestrator {
     }
   }
 
-  async runReadyTasks({ parallel = true, concurrency = Infinity, signal, timeoutMs, maxInboxSize = Infinity } = {}) {
+  async runReadyTasks({ parallel = true, concurrency = Infinity, signal, timeoutMs, maxInboxSize = Infinity, onTextChunk } = {}) {
     const ready = this.scheduler.listReady();
     const assignments = [];
     const reserved = new Set();
@@ -106,7 +106,7 @@ export class AgentOrchestrator {
       const results = [];
       for (const assignment of assignments) {
         if (signal?.aborted) break;
-        results.push(await this.#runAssignment(assignment, { signal, timeoutMs }));
+        results.push(await this.#runAssignment(assignment, { signal, timeoutMs, onTextChunk }));
       }
       return results;
     }
@@ -119,7 +119,7 @@ export class AgentOrchestrator {
         if (signal?.aborted) break;
         const next = queue.shift();
         if (!next) break;
-        results.push(await this.#runAssignment(next, { signal, timeoutMs }));
+        results.push(await this.#runAssignment(next, { signal, timeoutMs, onTextChunk }));
       }
     };
     await Promise.all(Array.from({ length: Math.min(limit, assignments.length || 0) }, worker));
@@ -131,7 +131,7 @@ export class AgentOrchestrator {
     if (!agent) return { agentId, error: 'unknown-agent' };
     this.agents.update(agent.id, { status: 'running', currentMessageId: message.id });
     try {
-      const result = await raceWithControls(() => this.executor.executeMessage(agent, message), controls);
+      const result = await raceWithControls(() => this.executor.executeMessage(agent, message, { onTextChunk: controls.onTextChunk }), controls);
       this.agents.update(agent.id, { status: 'idle', currentMessageId: null, lastResult: result.finalText ?? '', lastError: null });
       if (message.kind === 'request' && message.expectReply !== false) {
         this.inbox.respond(message, { from: agent.id, body: result.finalText ?? '', payload: result });
@@ -217,6 +217,12 @@ export class AgentOrchestrator {
           if (worker.restarts >= worker.maxRestarts) {
             worker.status = 'failed';
             worker.lastStoppedAt = new Date().toISOString();
+            this.agents.update(agentId, {
+              status: 'failed',
+              currentTaskId: null,
+              currentMessageId: null,
+              lastError: worker.lastError,
+            });
             throw error;
           }
           worker.restarts += 1;

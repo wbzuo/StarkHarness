@@ -183,7 +183,9 @@ export async function callChatCompletionsAPI({
 
   if (!response.ok) {
     const errorBody = await response.text().catch(() => '');
-    throw new Error(`OpenAI-compatible API error ${response.status}: ${errorBody}`);
+    const error = new Error(`OpenAI-compatible API error ${response.status}: ${errorBody}`);
+    error.status = response.status;
+    throw error;
   }
 
   const data = await response.json();
@@ -227,7 +229,9 @@ export async function streamChatCompletionsAPI({
 
   if (!response.ok) {
     const errorBody = await response.text().catch(() => '');
-    throw new Error(`OpenAI-compatible API error ${response.status}: ${errorBody}`);
+    const error = new Error(`OpenAI-compatible API error ${response.status}: ${errorBody}`);
+    error.status = response.status;
+    throw error;
   }
 
   const result = {

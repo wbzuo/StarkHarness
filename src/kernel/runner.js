@@ -1,10 +1,8 @@
 // maxTurns limits total tool executions, not API round-trips.
 // A single response with N tool_use blocks counts as N turns.
-const DEFAULT_MAX_TURNS = 25;
+import { tokenizeForStreaming } from '../utils/text.js';
 
-function tokenizeForStreaming(text) {
-  return String(text).split(/(\s+)/).filter(Boolean);
-}
+const DEFAULT_MAX_TURNS = 25;
 
 async function emitTextChunks(onTextChunk, text) {
   if (typeof onTextChunk !== 'function' || !text) return;
@@ -29,8 +27,9 @@ export class AgentRunner {
     let finalText = '';
     let stopReason = 'end_turn';
     let totalUsage = { input_tokens: 0, output_tokens: 0 };
+    const maxApiCalls = Math.max(1, this.maxTurns + 1);
 
-    for (let i = 0; i < this.maxTurns; i++) {
+    for (let i = 0; i < maxApiCalls; i++) {
       const response = await this.provider.complete({
         systemPrompt,
         messages,
@@ -65,8 +64,14 @@ export class AgentRunner {
       }
 
       // Execute each tool call through the hook pipeline
+      const remainingTurns = Math.max(0, this.maxTurns - turns.length);
+      const toolCallsToExecute = response.toolCalls.slice(0, remainingTurns);
+      if (toolCallsToExecute.length === 0) {
+        stopReason = 'max-turns';
+        break;
+      }
       const toolResults = [];
-      for (const tc of response.toolCalls) {
+      for (const tc of toolCallsToExecute) {
         const turnResult = await this.#executeTool(tc);
         turns.push({ toolName: tc.name, toolId: tc.id, input: tc.input, result: turnResult });
         toolResults.push({
@@ -78,7 +83,7 @@ export class AgentRunner {
       messages.push({ role: 'user', content: toolResults });
 
       // Check max turns
-      if (turns.length >= this.maxTurns) {
+      if (toolCallsToExecute.length < response.toolCalls.length || turns.length >= this.maxTurns) {
         stopReason = 'max-turns';
         break;
       }

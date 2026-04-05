@@ -45,6 +45,15 @@ test('TaskScheduler respects dependencies and retry budget', () => {
   assert.ok(!readyIds.includes('task-4'));
 });
 
+test('TaskScheduler increments attempts when marking retryable', () => {
+  const tasks = new TaskStore([{ id: 'task-1', status: 'assigned', attempts: 0, maxRetries: 1 }]);
+  const agents = new AgentManager([{ id: 'agent-1', role: 'reviewer', status: 'idle' }]);
+  const scheduler = new TaskScheduler({ tasks, agents });
+  scheduler.markRetryable('task-1', 'boom');
+  assert.equal(tasks.get('task-1').attempts, 1);
+  assert.deepEqual(scheduler.listReady(), []);
+});
+
 test('TaskScheduler blocks cyclic dependencies', () => {
   const tasks = new TaskStore([
     { id: 'task-1', status: 'pending', dependsOn: ['task-2'] },
@@ -71,6 +80,13 @@ test('TaskScheduler applies inbox backpressure when selecting agents', () => {
     maxInboxSize: 1,
   });
   assert.equal(selected.id, 'agent-2');
+});
+
+test('TaskStore preserves auto ids after custom ids', () => {
+  const tasks = new TaskStore();
+  tasks.create({ id: 'task-42', subject: 'manual' });
+  const created = tasks.create({ subject: 'auto' });
+  assert.equal(created.id, 'task-43');
 });
 
 test('AgentOrchestrator executes tasks in parallel and retries failures', async () => {
@@ -144,6 +160,31 @@ test('AgentOrchestrator worker loop consumes inbox requests and writes replies',
   assert.equal(worker.processedRequests >= 1, true);
   const agentState = await runtime.state.loadAgentState('agent-1');
   assert.equal(agentState.handledMessages >= 1, true);
+  await runtime.shutdown();
+});
+
+test('AgentOrchestrator forwards onTextChunk into executor runs', async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'starkharness-streaming-agent-'));
+  const runtime = await createRuntime({ stateDir: path.join(root, '.starkharness'), session: { cwd: root, goal: 'streaming' } });
+  const agent = runtime.agents.spawn({ id: 'agent-1', role: 'reviewer', description: 'streams results' });
+  const task = runtime.tasks.create({ id: 'task-1', subject: 'stream', status: 'pending' });
+  const chunks = [];
+
+  runtime.providers.completeWithStrategy = async ({ request }) => {
+    await request.onTextChunk?.('hello');
+    return { text: 'hello', toolCalls: [], stopReason: 'end_turn', usage: {}, streamed: true };
+  };
+
+  const result = await runtime.orchestrator.runReadyTasks({
+    parallel: false,
+    onTextChunk: async (chunk) => {
+      chunks.push(chunk);
+    },
+  });
+
+  assert.equal(result.length, 1);
+  assert.deepEqual(chunks, ['hello']);
+  assert.equal(runtime.tasks.get(task.id).status, 'completed');
   await runtime.shutdown();
 });
 

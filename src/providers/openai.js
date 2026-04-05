@@ -23,6 +23,7 @@ export function createOpenAIProvider(config = {}) {
     purpose: 'Codex/GPT-class provider adapter',
     modelFamily: 'gpt',
     capabilities: ['chat', 'tools'],
+    aliases: ['openai', 'gpt', 'codex'],
     priority: 2,
     async complete({ systemPrompt, messages, tools, prompt, onTextChunk }) {
       const effectiveMessages = messages ?? (prompt ? [{ role: 'user', content: prompt }] : []);

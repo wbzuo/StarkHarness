@@ -193,7 +193,9 @@ export async function callMessagesAPI({
 
   if (!response.ok) {
     const errorBody = await response.text().catch(() => '');
-    throw new Error(`Anthropic API error ${response.status}: ${errorBody}`);
+    const error = new Error(`Anthropic API error ${response.status}: ${errorBody}`);
+    error.status = response.status;
+    throw error;
   }
 
   const data = await response.json();
@@ -229,7 +231,9 @@ export async function streamMessagesAPI({
 
   if (!response.ok) {
     const errorBody = await response.text().catch(() => '');
-    throw new Error(`Anthropic API error ${response.status}: ${errorBody}`);
+    const error = new Error(`Anthropic API error ${response.status}: ${errorBody}`);
+    error.status = response.status;
+    throw error;
   }
 
   const accumulator = createStreamAccumulator();

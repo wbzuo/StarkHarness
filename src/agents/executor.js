@@ -55,7 +55,7 @@ export class AgentExecutor {
     await this.runtime.state.appendAgentTranscript(agent.id, { execution, result, recordedAt: new Date().toISOString() });
   }
 
-  async #run(agent, execution, userMessage, systemPrompt, tools) {
+  async #run(agent, execution, userMessage, systemPrompt, tools, options = {}) {
     const isolatedContext = createContextEnvelope({
       cwd: this.runtime.context.cwd,
       mode: `agent:${agent.id}`,
@@ -65,11 +65,11 @@ export class AgentExecutor {
 
     const runner = new AgentRunner({
       provider: {
-        complete: ({ systemPrompt, messages, tools: schemas }) =>
+        complete: ({ systemPrompt, messages, tools: schemas, onTextChunk }) =>
           this.runtime.providers.completeWithStrategy({
             capability: 'chat',
             prefer: agent.model && agent.model !== 'inherit' ? agent.model : undefined,
-            request: { systemPrompt, messages, tools: schemas },
+            request: { systemPrompt, messages, tools: schemas, onTextChunk },
             retryOptions: { maxRetries: 2, baseDelay: 50, timeout: 120000 },
           }),
       },
@@ -78,7 +78,12 @@ export class AgentExecutor {
       permissions: this.runtime.permissions,
     });
     runner.setRuntime({ ...this.runtime, context: isolatedContext });
-    const result = await runner.run({ userMessage, systemPrompt: isolatedContext.systemPrompt, toolSchemas: tools.toSchemaList() });
+    const result = await runner.run({
+      userMessage,
+      systemPrompt: isolatedContext.systemPrompt,
+      toolSchemas: tools.toSchemaList(),
+      onTextChunk: options.onTextChunk,
+    });
     await this.#persistAgent(agent, execution, result);
     return {
       agentId: agent.id,
@@ -91,15 +96,15 @@ export class AgentExecutor {
     };
   }
 
-  async execute(agent, task) {
+  async execute(agent, task, options = {}) {
     const tools = buildToolRegistry(this.runtime, agent);
     const userMessage = [agent.prompt, agent.description, task.subject, task.description].filter(Boolean).join('\n\n') || 'Complete the assigned task.';
-    return this.#run(agent, { kind: 'task', taskId: task.id }, userMessage, this.runtime.context.systemPrompt, tools);
+    return this.#run(agent, { kind: 'task', taskId: task.id }, userMessage, this.runtime.context.systemPrompt, tools, options);
   }
 
-  async executeMessage(agent, message) {
+  async executeMessage(agent, message, options = {}) {
     const tools = buildToolRegistry(this.runtime, agent);
     const userMessage = [message.body, JSON.stringify(message.payload ?? null)].filter(Boolean).join('\n\n') || 'Process inbox message.';
-    return this.#run(agent, { kind: 'message', messageId: message.id, correlationId: message.correlationId }, userMessage, this.runtime.context.systemPrompt, tools);
+    return this.#run(agent, { kind: 'message', messageId: message.id, correlationId: message.correlationId }, userMessage, this.runtime.context.systemPrompt, tools, options);
   }
 }

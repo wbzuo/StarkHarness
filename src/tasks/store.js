@@ -11,8 +11,13 @@ export class TaskStore {
   }
 
   create(task) {
+    const id = task.id ?? `task-${++this.#seq}`;
+    if (task.id) {
+      const match = String(task.id).match(/(\d+)$/);
+      if (match) this.#seq = Math.max(this.#seq, Number(match[1]));
+    }
     const next = {
-      id: task.id ?? `task-${++this.#seq}`,
+      id,
       status: task.status ?? 'pending',
       owner: task.owner ?? null,
       ...task,
@@ -41,4 +46,3 @@ export class TaskStore {
     return this.#tasks.get(id);
   }
 }
-

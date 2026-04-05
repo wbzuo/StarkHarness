@@ -93,7 +93,6 @@ export class TaskScheduler {
       owner: agent.id,
       status: 'assigned',
       assignedAt: new Date().toISOString(),
-      attempts: Number(task.attempts ?? 0) + 1,
     });
   }
 
@@ -103,7 +102,7 @@ export class TaskScheduler {
       status: 'retryable',
       error,
       lastFailedAt: new Date().toISOString(),
-      attempts: Number(task?.attempts ?? 0),
+      attempts: Number(task?.attempts ?? 0) + 1,
     });
   }
 
@@ -116,10 +115,12 @@ export class TaskScheduler {
   }
 
   markTimedOut(taskId, timeoutMs) {
+    const task = this.tasks.get(taskId);
     return this.tasks.update(taskId, {
       status: 'retryable',
       error: `timeout:${timeoutMs}`,
       lastFailedAt: new Date().toISOString(),
+      attempts: Number(task?.attempts ?? 0) + 1,
     });
   }
 }

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { ModelStrategy, selectProvider, withRetry } from '../src/providers/strategy.js';
+import { ModelStrategy, selectProvider, withRetry, isRetryableError } from '../src/providers/strategy.js';
 
 test('ModelStrategy selects provider by capability', () => {
   const strategy = new ModelStrategy({
@@ -24,6 +24,18 @@ test('ModelStrategy falls back when primary unavailable', () => {
   });
 
   assert.equal(strategy.select({ require: 'tools' }), 'openai');
+});
+
+test('ModelStrategy can prefer provider aliases and model families', () => {
+  const strategy = new ModelStrategy({
+    providers: [
+      { id: 'anthropic', modelFamily: 'claude', aliases: ['sonnet'], capabilities: ['chat'], priority: 1 },
+      { id: 'openai', modelFamily: 'gpt', aliases: ['codex'], capabilities: ['chat'], priority: 2 },
+    ],
+  });
+
+  assert.equal(strategy.select({ require: 'chat', prefer: 'sonnet' }), 'anthropic');
+  assert.equal(strategy.select({ require: 'chat', prefer: 'gpt' }), 'openai');
 });
 
 test('selectProvider returns first capable provider id', () => {
@@ -63,4 +75,26 @@ test('withRetry respects timeout', async () => {
     () => withRetry(fn, { maxRetries: 1, baseDelay: 1, timeout: 50 }),
     /timed out/i,
   );
+});
+
+test('withRetry does not retry non-retryable client errors', async () => {
+  let attempts = 0;
+  const fn = async () => {
+    attempts += 1;
+    const error = new Error('bad request');
+    error.status = 400;
+    throw error;
+  };
+
+  await assert.rejects(() => withRetry(fn, { maxRetries: 3, baseDelay: 1 }), /bad request/);
+  assert.equal(attempts, 1);
+});
+
+test('isRetryableError distinguishes retryable transport errors from client errors', () => {
+  const timeout = new Error('Request timed out');
+  timeout.name = 'TimeoutError';
+  const client = new Error('unauthorized');
+  client.status = 401;
+  assert.equal(isRetryableError(timeout), true);
+  assert.equal(isRetryableError(client), false);
 });

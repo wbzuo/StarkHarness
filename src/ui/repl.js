@@ -1,15 +1,14 @@
 import readline from 'node:readline/promises';
 import { stdin as input, stdout as output } from 'node:process';
+import { tokenizeForStreaming } from '../utils/text.js';
+
+export { tokenizeForStreaming } from '../utils/text.js';
 
 export function createReplBlueprint() {
   return {
     mode: 'readline',
     status: 'ready',
   };
-}
-
-export function tokenizeForStreaming(text) {
-  return String(text).split(/(\s+)/).filter(Boolean);
 }
 
 export async function streamText(outputStream, text) {

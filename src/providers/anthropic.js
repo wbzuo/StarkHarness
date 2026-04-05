@@ -23,6 +23,7 @@ export function createAnthropicProvider(config = {}) {
     purpose: 'Claude-class provider adapter',
     modelFamily: 'claude',
     capabilities: ['chat', 'tools', 'vision'],
+    aliases: ['sonnet', 'opus', 'haiku', 'claude', 'anthropic'],
     priority: 1,
     async complete({ systemPrompt, messages, tools, prompt, onTextChunk, ...rest }) {
       // Support both old (prompt-based) and new (messages-based) calling conventions

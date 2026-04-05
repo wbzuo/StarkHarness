@@ -23,6 +23,7 @@ export function createCompatibleProvider(config = {}) {
     purpose: 'OpenAI/Anthropic-compatible gateway adapter',
     modelFamily: 'compatible',
     capabilities: ['chat', 'tools'],
+    aliases: ['compatible', 'deepseek'],
     priority: 1,
     async complete({ systemPrompt, messages, tools, prompt, onTextChunk }) {
       const effectiveMessages = messages ?? (prompt ? [{ role: 'user', content: prompt }] : []);

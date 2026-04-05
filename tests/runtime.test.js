@@ -129,6 +129,10 @@ test('search and glob tools inspect workspace contents', async () => {
     tool: 'write_file',
     input: { path: 'docs/alpha.txt', content: 'needle here' },
   });
+  await runHarnessTurn(runtime, {
+    tool: 'write_file',
+    input: { path: 'src/index.js', content: 'const needle = true;' },
+  });
 
   const searchResult = await runHarnessTurn(runtime, {
     tool: 'search',
@@ -136,6 +140,15 @@ test('search and glob tools inspect workspace contents', async () => {
   });
   assert.equal(searchResult.ok, true);
   assert.ok(searchResult.matches.some((match) => match.path === path.join(root, 'docs/alpha.txt')));
+  assert.ok(searchResult.matches.some((match) => match.path === path.join(root, 'src/index.js')));
+
+  const filteredSearch = await runHarnessTurn(runtime, {
+    tool: 'search',
+    input: { query: 'needle', glob: '*.js' },
+  });
+  assert.equal(filteredSearch.ok, true);
+  assert.equal(filteredSearch.matches.length, 1);
+  assert.equal(filteredSearch.matches[0].path, path.join(root, 'src/index.js'));
 
   const globResult = await runHarnessTurn(runtime, {
     tool: 'glob',
@@ -143,6 +156,13 @@ test('search and glob tools inspect workspace contents', async () => {
   });
   assert.equal(globResult.ok, true);
   assert.equal(globResult.matches[0], path.join(root, 'docs/alpha.txt'));
+
+  const globPattern = await runHarnessTurn(runtime, {
+    tool: 'glob',
+    input: { pattern: 'src/*.js' },
+  });
+  assert.equal(globPattern.ok, true);
+  assert.deepEqual(globPattern.matches, [path.join(root, 'src/index.js')]);
 });
 
 test('delegate tools persist agents tasks and messages', async () => {

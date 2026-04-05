@@ -6,6 +6,47 @@ import { defineTool } from '../types.js';
 
 const execFileAsync = promisify(execFile);
 
+function normalizePathForMatch(filePath) {
+  return filePath.split(path.sep).join('/');
+}
+
+function escapeRegex(value) {
+  return value.replace(/[|\\{}()[\]^$+?.]/g, '\\$&');
+}
+
+function globToRegExp(pattern) {
+  const normalized = normalizePathForMatch(pattern);
+  let regex = '^';
+  for (let index = 0; index < normalized.length; index += 1) {
+    const char = normalized[index];
+    const next = normalized[index + 1];
+    if (char === '*' && next === '*') {
+      regex += '.*';
+      index += 1;
+      continue;
+    }
+    if (char === '*') {
+      regex += '[^/]*';
+      continue;
+    }
+    if (char === '?') {
+      regex += '[^/]';
+      continue;
+    }
+    regex += escapeRegex(char);
+  }
+  regex += '$';
+  return new RegExp(regex);
+}
+
+function matchesGlob(filePath, pattern, cwd) {
+  if (!pattern) return true;
+  const relative = normalizePathForMatch(path.relative(cwd, filePath));
+  const base = normalizePathForMatch(path.basename(filePath));
+  const regex = globToRegExp(pattern);
+  return regex.test(relative) || (!pattern.includes('/') && regex.test(base));
+}
+
 function resolveWorkspacePath(runtime, targetPath = '.') {
   if (!targetPath) return runtime.context.cwd;
   return path.resolve(runtime.context.cwd, targetPath);
@@ -138,8 +179,9 @@ export function createBuiltinTools() {
       async execute(input = {}, runtime) {
         const query = String(input.query ?? '');
         const files = await walkFiles(runtime.context.cwd);
-        const needle = input.glob?.replaceAll('*', '') ?? '';
-        const filtered = needle ? files.filter((f) => f.includes(needle)) : files;
+        const filtered = input.glob
+          ? files.filter((filePath) => matchesGlob(filePath, String(input.glob), runtime.context.cwd))
+          : files;
         const matches = [];
         for (const filePath of filtered) {
           const content = await readFile(filePath, 'utf8').catch(() => null);
@@ -166,8 +208,7 @@ export function createBuiltinTools() {
       async execute(input = {}, runtime) {
         const pattern = String(input.pattern ?? '');
         const files = await walkFiles(runtime.context.cwd);
-        const needle = pattern.replaceAll('*', '');
-        const matches = files.filter((f) => f.includes(needle));
+        const matches = files.filter((filePath) => matchesGlob(filePath, pattern, runtime.context.cwd));
         return { ok: true, tool: 'glob', pattern, matches };
       },
     }),

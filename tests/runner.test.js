@@ -201,6 +201,33 @@ test('AgentRunner handles multiple tool calls in single response', async () => {
   assert.equal(result.finalText, 'Both files read.');
 });
 
+test('AgentRunner enforces max turns consistently across multi-tool responses', async () => {
+  const provider = makeMockProvider([
+    {
+      text: 'Reading several files.',
+      toolCalls: [
+        { id: 'tu_1', name: 'read_file', input: { path: 'a.js' } },
+        { id: 'tu_2', name: 'read_file', input: { path: 'b.js' } },
+      ],
+      stopReason: 'tool_use',
+      usage: {},
+    },
+  ]);
+  const hooks = new HookDispatcher();
+  const tools = new ToolRegistry();
+  tools.register(makeTestTool('read_file', { content: 'data' }));
+  const permissions = new PermissionEngine({ read: 'allow' });
+
+  const runner = new AgentRunner({ provider, hooks, tools, permissions, maxTurns: 1 });
+  const result = await runner.run({
+    userMessage: 'Read two files',
+    systemPrompt: 'You are helpful.',
+  });
+
+  assert.equal(result.turns.length, 1);
+  assert.equal(result.stopReason, 'max-turns');
+});
+
 test('AgentRunner fires Stop hook before finishing', async () => {
   const provider = makeMockProvider([
     { text: 'Done.', toolCalls: [], stopReason: 'end_turn', usage: {} },
