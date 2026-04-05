@@ -270,11 +270,22 @@ export async function createRuntime(options = {}) {
       });
       return { ...result, activeSkill: binding?.name ?? null };
     },
+    async startWorker(agentId, options = {}) {
+      return this.orchestrator.startWorker(agentId, options);
+    },
+    async stopWorker(agentId) {
+      return this.orchestrator.stopWorker(agentId);
+    },
+    listWorkers() {
+      return this.orchestrator.listWorkers();
+    },
     async shutdown() {
+      const workerIds = this.orchestrator.listWorkers().map((worker) => worker.agentId);
+      await Promise.all(workerIds.map((agentId) => this.orchestrator.stopWorker(agentId)));
       await this.hooks.fire('SessionEnd', { sessionId: this.session.id, cwd: this.session.cwd });
       const disconnects = [...this.mcpClients.values()].map((client) => client.disconnect().catch(() => {}));
       await Promise.all(disconnects);
-      await this.log('runtime:shutdown', { sessionId: this.session.id, mcpClients: this.mcpClients.size });
+      await this.log('runtime:shutdown', { sessionId: this.session.id, mcpClients: this.mcpClients.size, workers: workerIds.length });
     },
   };
 

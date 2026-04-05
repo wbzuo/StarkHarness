@@ -37,7 +37,7 @@ function createSessionSummary(runtime) {
     tasks: runtime.tasks.list().length,
     agents: runtime.agents.list().length,
     messages: (runtime.session.messages ?? []).length,
-    queuedMessages: runtime.inbox.list(runtime.session.id).length,
+    queuedMessages: runtime.inbox.totalCount(),
   };
 }
 
@@ -131,7 +131,11 @@ export function createCommandRegistry() {
       name: 'orchestrate',
       description: 'Dispatch all ready tasks across available agents',
       async execute(runtime) {
-        return runtime.orchestrator.runReadyTasks();
+        return runtime.orchestrator.runReadyTasks({
+          parallel: args.parallel !== 'false',
+          concurrency: args.concurrency ? Number(args.concurrency) : Infinity,
+          timeoutMs: args.timeoutMs ? Number(args.timeoutMs) : undefined,
+        });
       },
     },
     {
@@ -147,6 +151,38 @@ export function createCommandRegistry() {
       async execute(runtime) {
         const { startRepl } = await import('../ui/repl.js');
         return startRepl(runtime);
+      },
+    },
+    {
+      name: 'workers',
+      description: 'List active agent inbox workers',
+      async execute(runtime) {
+        return runtime.listWorkers();
+      },
+    },
+    {
+      name: 'worker-start',
+      description: 'Start an inbox worker loop for an agent',
+      async execute(runtime, args = {}) {
+        return runtime.startWorker(args.agent ?? args.id ?? 'agent-1', {
+          pollIntervalMs: Number(args.pollIntervalMs ?? 50),
+          maxMessagesPerTick: Number(args.maxMessagesPerTick ?? 1),
+          timeoutMs: Number(args.timeoutMs ?? 120000),
+        });
+      },
+    },
+    {
+      name: 'worker-stop',
+      description: 'Stop an inbox worker loop for an agent',
+      async execute(runtime, args = {}) {
+        return runtime.stopWorker(args.agent ?? args.id ?? 'agent-1');
+      },
+    },
+    {
+      name: 'agent-state',
+      description: 'Load persisted state for an agent',
+      async execute(runtime, args = {}) {
+        return runtime.state.loadAgentState(args.agent ?? args.id ?? 'agent-1');
       },
     },
     {

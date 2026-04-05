@@ -223,13 +223,20 @@ export function createBuiltinTools() {
           from: { type: 'string', description: 'Sender agent ID' },
           to: { type: 'string', description: 'Recipient agent ID' },
           body: { type: 'string', description: 'Message content' },
+          kind: { type: 'string', enum: ['event', 'request', 'response'], description: 'Mailbox message kind' },
+          correlationId: { type: 'string', description: 'RPC correlation id' },
+          replyTo: { type: 'string', description: 'Reply target agent id' },
+          expectReply: { type: 'boolean', description: 'Whether a request expects a response' },
+          payload: { type: 'object', description: 'Structured payload' },
         },
         required: ['to', 'body'],
       },
       async execute(input = {}, runtime) {
-        const message = { from: input.from ?? 'runtime', to: input.to, body: input.body ?? '', sentAt: new Date().toISOString() };
-        runtime.session.messages = [...(runtime.session.messages ?? []), message];
-        const routed = runtime.inbox.send(input.to, message);
+        const base = { from: input.from ?? 'runtime', to: input.to, body: input.body ?? '', sentAt: new Date().toISOString(), kind: input.kind, correlationId: input.correlationId, replyTo: input.replyTo, expectReply: input.expectReply, payload: input.payload };
+        runtime.session.messages = [...(runtime.session.messages ?? []), base];
+        const routed = input.kind === 'request'
+          ? runtime.inbox.request(input.to, base)
+          : runtime.inbox.send(input.to, base);
         await runtime.persist();
         return { ok: true, tool: 'send_message', message: routed };
       },
@@ -258,7 +265,7 @@ export function createBuiltinTools() {
             task = runtime.tasks.update(input.id, input.patch ?? {});
             break;
           case 'dispatch':
-            return { ok: true, tool: 'tasks', results: await runtime.orchestrator.runReadyTasks(), tasks: runtime.tasks.list() };
+            return { ok: true, tool: 'tasks', results: await runtime.orchestrator.runReadyTasks({ parallel: input.parallel !== false, concurrency: input.concurrency ?? Infinity, timeoutMs: input.timeoutMs }), tasks: runtime.tasks.list() };
           default:
             return { ok: true, tool: 'tasks', tasks: runtime.tasks.list() };
         }

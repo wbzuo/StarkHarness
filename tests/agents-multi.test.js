@@ -1,20 +1,22 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { mkdtemp } from 'node:fs/promises';
+import path from 'node:path';
+import os from 'node:os';
 import { AgentInbox } from '../src/agents/inbox.js';
 import { TaskScheduler } from '../src/tasks/scheduler.js';
 import { TaskStore } from '../src/tasks/store.js';
 import { AgentManager } from '../src/agents/manager.js';
 import { AgentOrchestrator } from '../src/agents/orchestrator.js';
+import { createRuntime } from '../src/kernel/runtime.js';
 
-test('AgentInbox routes and consumes messages per agent', () => {
+test('AgentInbox routes, consumes, and supports RPC responses', () => {
   const inbox = new AgentInbox();
-  inbox.send('agent-1', { body: 'hello' });
-  inbox.send('agent-1', { body: 'again' });
-  inbox.send('agent-2', { body: 'world' });
-  assert.equal(inbox.count('agent-1'), 2);
-  assert.equal(inbox.peek('agent-1').body, 'hello');
-  assert.equal(inbox.consume('agent-1', 1)[0].body, 'hello');
-  assert.equal(inbox.pop('agent-1').body, 'again');
+  const req = inbox.request('agent-1', { from: 'agent-0', body: 'ping' });
+  inbox.respond(req, { from: 'agent-1', body: 'pong' });
+  assert.equal(inbox.count('agent-1'), 1);
+  assert.equal(inbox.findResponse('agent-0', req.correlationId).body, 'pong');
+  assert.equal(inbox.consumeWork('agent-0').length, 0);
 });
 
 test('TaskScheduler respects dependencies and retry budget', () => {
@@ -52,11 +54,31 @@ test('AgentOrchestrator executes tasks in parallel and retries failures', async 
     },
   };
   const orchestrator = new AgentOrchestrator({ agents, tasks, scheduler, executor, inbox });
-  const first = await orchestrator.runReadyTasks();
+  const first = await orchestrator.runReadyTasks({ concurrency: 2 });
   assert.equal(first.length, 2);
   assert.equal(tasks.get('task-1').status, 'completed');
   assert.equal(tasks.get('task-2').status, 'retryable');
   const second = await orchestrator.runReadyTasks();
   assert.equal(second.length, 1);
   assert.equal(tasks.get('task-2').status, 'completed');
+});
+
+test('AgentOrchestrator worker loop consumes inbox requests and writes replies', async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'starkharness-worker-'));
+  const runtime = await createRuntime({ stateDir: path.join(root, '.starkharness'), session: { cwd: root, goal: 'worker' } });
+  runtime.agents.spawn({ id: 'agent-1', role: 'reviewer', description: 'reply to messages' });
+  runtime.inbox.request('agent-1', { from: 'agent-0', body: 'hello worker' });
+  runtime.executor.executeMessage = async (agent) => {
+    await runtime.state.saveAgentState(agent.id, { handledMessages: 1 });
+    return { finalText: 'pong', stopReason: 'end_turn', usage: {} };
+  };
+  runtime.startWorker('agent-1', { pollIntervalMs: 1, maxMessagesPerTick: 1, timeoutMs: 100 });
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  await runtime.stopWorker('agent-1');
+  const replies = runtime.inbox.list('agent-0', { kind: 'response' });
+  assert.equal(replies.length, 1);
+  assert.equal(replies[0].body, 'pong');
+  const agentState = await runtime.state.loadAgentState('agent-1');
+  assert.equal(agentState.handledMessages >= 1, true);
+  await runtime.shutdown();
 });

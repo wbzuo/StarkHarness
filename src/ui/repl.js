@@ -8,10 +8,20 @@ export function createReplBlueprint() {
   };
 }
 
-function formatResult(result) {
-  if (typeof result?.finalText === 'string' && result.finalText) {
-    return result.finalText;
+export function tokenizeForStreaming(text) {
+  return String(text).split(/(\s+)/).filter(Boolean);
+}
+
+export async function streamText(outputStream, text) {
+  for (const token of tokenizeForStreaming(text)) {
+    outputStream.write(token);
+    await Promise.resolve();
   }
+  outputStream.write('\n');
+}
+
+function formatResult(result) {
+  if (typeof result?.finalText === 'string' && result.finalText) return result.finalText;
   return JSON.stringify(result, null, 2);
 }
 
@@ -23,16 +33,24 @@ export async function startRepl(runtime) {
       const line = (await rl.question('stark> ')).trim();
       if (!line) continue;
       if (line === 'exit' || line === 'quit') break;
-      let result;
-      if (line.startsWith('/')) {
-        const [command, ...rest] = line.slice(1).split(' ');
-        result = await runtime.dispatchCommand(command, { prompt: rest.join(' '), agent: rest[0], id: rest[0] });
-      } else {
-        output.write(`…thinking\n`);
-        result = await runtime.run(line);
+      try {
+        let result;
+        if (line.startsWith('/')) {
+          const [command, ...rest] = line.slice(1).split(' ');
+          result = await runtime.dispatchCommand(command, { prompt: rest.join(' '), agent: rest[0], id: rest[0] });
+        } else {
+          output.write('…thinking\n');
+          result = await runtime.run(line);
+        }
+        transcript.push({ line, result });
+        if (typeof result?.finalText === 'string' && result.finalText) {
+          await streamText(output, result.finalText);
+        } else {
+          output.write(`${formatResult(result)}\n`);
+        }
+      } catch (error) {
+        output.write(`Error: ${error instanceof Error ? error.message : String(error)}\n`);
       }
-      transcript.push({ line, result });
-      output.write(`${formatResult(result)}\n`);
     }
   } finally {
     rl.close();
