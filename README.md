@@ -19,7 +19,7 @@
 
 ## 🏗 System Architecture (Panoramic View)
 
-StarkHarness orchestrates a complex flow of data across four specialized planes:
+StarkHarness orchestrates a complex flow of data across five specialized planes:
 
 ```text
 ┌─────────────────────────────────────────────────────────────────────────────┐
@@ -30,13 +30,13 @@ StarkHarness orchestrates a complex flow of data across four specialized planes:
 ├─────────────────────────────────────────────────────────────────────────────┤
 │ 🛡️ CONTROL PLANES (Safety & Governance)                                     │
 │    permissions/engine (Policy Merge) • tasks/store (State Machine)          │
-│    agents/manager (Sub-agents)       • plugins/diagnostics (Conflicts)      │
+│    agents/orchestrator (Multi-Agent) • plugins/diagnostics (Conflicts)      │
 ├─────────────────────────────────────────────────────────────────────────────┤
 │ 🛠️ CAPABILITY SURFACE (Execution)                                           │
-│    Tools (JSON Schema) • Skills (3-level Progressive) • Commands (Markdown) │
+│    Tools (JSON Schema) • MCP (Protocol Support) • Commands (Markdown)       │
 ├─────────────────────────────────────────────────────────────────────────────┤
 │ 🤖 PROVIDER LAYER (Intelligence)                                            │
-│    Anthropic (Native) • OpenAI • Custom Model Adapters • MCP Bridge         │
+│    Anthropic-Live • OpenAI-Live • Custom Model Adapters • Strategy Engine   │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -63,28 +63,17 @@ export const myTool = defineTool({
     }
   },
   async execute(input, runtime) {
-    // Access the runtime's CWD or context
     const { stdout } = await runtime.shell('git status --short');
     return { ok: true, status: stdout };
   }
 });
 ```
 
-### 2. Register a Lifecycle Hook (`src/kernel/hooks.js`)
-Hooks allow you to inject logic into the Agent's turn loop.
-
-```javascript
-// Registering a PreToolUse hook to enforce security
-runtime.hooks.register('PreToolUse', {
-  matcher: 'shell',
-  handler: async (ctx) => {
-    if (ctx.toolInput.command.includes('sudo')) {
-      return { decision: 'deny', reason: 'Sudo commands are restricted.' };
-    }
-    return { decision: 'allow' };
-  }
-});
-```
+### 2. Multi-Agent Orchestration (`src/agents/`)
+StarkHarness natively supports spawning and coordinating child agents.
+- **`Orchestrator`**: Manages the life cycle of sub-agents.
+- **`Inbox`**: Handles cross-agent communication.
+- **`Executor`**: Runs specialized tasks in isolated runtimes.
 
 ---
 
@@ -95,7 +84,7 @@ runtime.hooks.register('PreToolUse', {
 | `read_file` | `read` | **Line Slicing**: Use `offset` and `limit` to read specific parts of huge files. |
 | `edit_file` | `write` | **Global Replace**: Set `replace_all: true` for codebase-wide updates. |
 | `shell` | `exec` | **Safe Execution**: `/bin/sh -c` with 120s timeout and 4MB output buffer. |
-| `spawn_agent` | `delegate` | **Role-Based**: Spawn specialized sub-agents with limited toolsets. |
+| `mcp` | `protocol` | **MCP Bridge**: Connect to any Model Context Protocol compliant server. |
 | `tasks` | `delegate` | **Stateful**: Integrated task manager (Create ➔ Update ➔ List). |
 
 ---
@@ -110,19 +99,34 @@ Execute commands via `node src/main.js <command>`.
 | `doctor` | **Health Check**: Validates harness wiring and system surfaces. |
 | `smoke-test` | **Quick Verification**: Runs an end-to-end `read_file` turn loop. |
 | `transcript` | **Event Log**: Replays the full harness event log with optional filters. |
-| `replay-turn` | **Deterministic Replay**: Generates a replay skeleton from recorded turns. |
 | `replay-runner` | **Execution Plan**: Evaluates a plan for re-running recorded agent turns. |
-| `plugins` | **Plugin Registry**: Shows loaded capabilities and diagnostic warnings. |
+
+---
+
+## 🏗 Project Structure
+
+```text
+src/
+├── kernel/          # Turn loop, session management, and prompt assembly
+├── permissions/     # Three-tier permission model and sandbox profiles
+├── tools/           # Built-in tools and JSON Schema definitions
+├── providers/       # Live adapters for Anthropic, OpenAI, and custom backends
+├── agents/          # Multi-agent orchestration and specialized executors
+├── mcp/             # Model Context Protocol implementation
+├── plugins/         # Manifest loading and conflict diagnostics
+└── telemetry/       # Transcript logging and event sinks
+```
 
 ---
 
 ## 🗺 Roadmap & Progress
 
 - [x] **Core Harness**: High-fidelity session/turn loop and persistence.
-- [x] **Registry & Diagnostics**: Automatic conflict detection for plugins.
-- [ ] **Phase 1**: Real Anthropic/OpenAI provider backends with streaming.
-- [ ] **Phase 2**: MCP (Model Context Protocol) full transport support.
-- [ ] **Phase 3**: Rich TUI / REPL with syntax highlighting.
+- [x] **Live Providers**: Native support for Anthropic and OpenAI.
+- [x] **Multi-Agent**: Orchestration and inter-agent communication.
+- [ ] **Phase 1**: Full MCP 1.0 specification support.
+- [ ] **Phase 2**: TUI / REPL with syntax highlighting and auto-completion.
+- [ ] **Phase 3**: Deterministic Replay Engine for agent failure analysis.
 
 ---
 

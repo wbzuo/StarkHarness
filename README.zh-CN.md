@@ -19,7 +19,7 @@
 
 ## 🏗 系统架构（全景图）
 
-StarkHarness 在四个专业平面之间编排复杂的数据流：
+StarkHarness 在五个专业平面之间编排复杂的数据流：
 
 ```text
 ┌─────────────────────────────────────────────────────────────────────────────┐
@@ -30,13 +30,13 @@ StarkHarness 在四个专业平面之间编排复杂的数据流：
 ├─────────────────────────────────────────────────────────────────────────────┤
 │ 🛡️ 控制平面 (安全与治理层)                                                   │
 │    permissions/engine (策略合并)    • tasks/store (任务状态机)                │
-│    agents/manager (子 Agent 管理)    • plugins/diagnostics (冲突检测)          │
+│    agents/orchestrator (多 Agent 编排) • plugins/diagnostics (冲突检测)       │
 ├─────────────────────────────────────────────────────────────────────────────┤
 │ 🛠️ 能力平面 (执行能力层)                                                     │
-│    工具 (JSON Schema) • 技能 (三级渐进式加载) • 命令 (Markdown 驱动)          │
+│    工具 (JSON Schema) • MCP (协议支持) • 命令 (Markdown 驱动)                │
 ├─────────────────────────────────────────────────────────────────────────────┤
 │ 🤖 供应平面 (模型智能层)                                                     │
-│    Anthropic (原生) • OpenAI • 自定义模型适配器 • MCP 协议桥接               │
+│    Anthropic-Live • OpenAI-Live • 自定义模型适配器 • 策略引擎                │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -63,28 +63,17 @@ export const myTool = defineTool({
     }
   },
   async execute(input, runtime) {
-    // 访问运行时的当前工作目录或上下文
     const { stdout } = await runtime.shell('git status --short');
     return { ok: true, status: stdout };
   }
 });
 ```
 
-### 2. 注册生命周期钩子 (`src/kernel/hooks.js`)
-钩子允许您在 Agent 的 Turn Loop 中注入自定义逻辑。
-
-```javascript
-// 注册 PreToolUse 钩子来增强安全性
-runtime.hooks.register('PreToolUse', {
-  matcher: 'shell',
-  handler: async (ctx) => {
-    if (ctx.toolInput.command.includes('sudo')) {
-      return { decision: 'deny', reason: '禁止使用 sudo 命令。' };
-    }
-    return { decision: 'allow' };
-  }
-});
-```
+### 2. 多 Agent 编排 (`src/agents/`)
+StarkHarness 原生支持生成并协调子 Agent：
+- **`Orchestrator`**: 管理子 Agent 的全生命周期。
+- **`Inbox`**: 处理 Agent 间的跨边界通信。
+- **`Executor`**: 在隔离的环境中执行特定任务。
 
 ---
 
@@ -95,7 +84,7 @@ runtime.hooks.register('PreToolUse', {
 | `read_file` | `read` | **行切片**: 支持 `offset` 和 `limit` 参数，精准读取超大文件的特定部分。 |
 | `edit_file` | `write` | **全局替换**: 设置 `replace_all: true` 即可实现全代码库范围的精确更新。 |
 | `shell` | `exec` | **受控执行**: 通过 `/bin/sh -c` 运行，默认 120s 超时及 4MB 输出缓冲。 |
-| `spawn_agent` | `delegate` | **角色化隔离**: 创建具备特定职责和独立工具白名单的子 Agent。 |
+| `mcp` | `protocol` | **MCP 桥接**: 连接任何符合 Model Context Protocol 标准的服务。 |
 | `tasks` | `delegate` | **状态机管理**: 集成任务管理器（创建 ➔ 更新 ➔ 列表）。 |
 
 ---
@@ -107,22 +96,37 @@ runtime.hooks.register('PreToolUse', {
 | 命令 | 用途 |
 | :--- | :--- |
 | `registry` | **全量诊断**: 列出所有工具、命令、供应商及插件冲突。 |
-| `doctor` | **健康检查**: 验证系统连接性及各平面状态。 |
+| `doctor` | **健康检查**: 验证内核连通性及系统平面状态。 |
 | `smoke-test` | **快速验证**: 执行端到端的 `read_file` 循环。 |
 | `transcript` | **事件日志**: 回放完整日志，支持自定义过滤。 |
-| `replay-turn` | **确定性重放**: 从已记录的步骤生成重放骨架。 |
 | `replay-runner` | **执行计划**: 评估并执行记录步骤的重放计划。 |
-| `plugins` | **插件注册表**: 显示已加载能力及诊断警告。 |
+
+---
+
+## 🏗 项目结构
+
+```text
+src/
+├── kernel/          # Turn 循环、会话管理和提示词组装
+├── permissions/     # 三级权限模型与沙箱 Profile
+├── tools/           # 内置工具与 JSON Schema 定义
+├── providers/       # Anthropic 与 OpenAI 的原生适配器
+├── agents/          # 多 Agent 编排与专用执行器
+├── mcp/             # 模型上下文协议 (MCP) 实现
+├── plugins/         # 插件加载与冲突诊断
+└── telemetry/       # 日志记录与事件 Sink
+```
 
 ---
 
 ## 🗺 路线图与进度
 
 - [x] **核心框架**: 高保真会话、Turn Loop 循环及持久化。
-- [x] **注册表与诊断**: 自动检测插件间的命令/工具名冲突。
-- [ ] **阶段 1**: 实现支持流式输出的 Anthropic/OpenAI 供应后端。
-- [ ] **阶段 2**: 完整支持 MCP (Model Context Protocol) 传输协议。
-- [ ] **阶段 3**: 开发具备语法高亮和自动补全的富交互 TUI / REPL。
+- [x] **原生供应商**: 内置 Anthropic 与 OpenAI 的 Live 支持。
+- [x] **多 Agent**: 实现了多 Agent 编排与通信机制。
+- [ ] **阶段 1**: 完整支持 MCP 1.0 规范。
+- [ ] **阶段 2**: 开发具备语法高亮和自动补全的富交互 TUI / REPL。
+- [ ] **阶段 3**: 实现确定性重放引擎，用于 Agent 故障分析。
 
 ---
 
