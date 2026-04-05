@@ -25,6 +25,7 @@ import { getSandboxProfile } from '../permissions/profiles.js';
 import { diagnosePluginConflicts } from '../plugins/diagnostics.js';
 import { MemoryManager } from '../memory/index.js';
 import { SkillLoader } from '../skills/loader.js';
+import { matchAndBind } from '../skills/binder.js';
 import { AgentRunner } from './runner.js';
 
 function createSnapshot(runtime) {
@@ -158,7 +159,11 @@ export async function createRuntime(options = {}) {
   const runner = new AgentRunner({
     provider: {
       async complete({ systemPrompt, messages, tools }) {
-        return providers.complete('anthropic', { systemPrompt, messages, tools });
+        return providers.completeWithStrategy({
+          capability: 'chat',
+          request: { systemPrompt, messages, tools },
+          retryOptions: { maxRetries: 2, baseDelay: 50, timeout: 120000 },
+        });
       },
     },
     hooks,
@@ -216,9 +221,26 @@ export async function createRuntime(options = {}) {
     },
     async run(userMessage) {
       await this.log('run:start', { userMessage });
+      const discovered = this.skills.listDiscovered();
+      const skillMap = new Map(discovered.map((skill) => [skill.dir, skill]));
+      const match = matchAndBind(userMessage, skillMap);
+      let binding = match;
+      if (match) {
+        const full = await this.skills.loadSkill(match.dir).catch(() => null);
+        if (full) {
+          binding = {
+            name: full.name,
+            body: full.body,
+            promptAddendum: `\n\n# Active Skill: ${full.name}\n\n${full.body}`,
+          };
+        }
+      }
+      const effectiveSystemPrompt = binding
+        ? `${this.context.systemPrompt}${binding.promptAddendum}`
+        : this.context.systemPrompt;
       const result = await this.runner.run({
         userMessage,
-        systemPrompt: this.context.systemPrompt,
+        systemPrompt: effectiveSystemPrompt,
       });
       // Persist each tool turn back into the session
       for (const turn of result.turns) {
@@ -233,8 +255,15 @@ export async function createRuntime(options = {}) {
         turns: result.turns.length,
         stopReason: result.stopReason,
         usage: result.usage,
+        skill: binding?.name ?? null,
       });
-      return result;
+      return { ...result, activeSkill: binding?.name ?? null };
+    },
+    async shutdown() {
+      await this.hooks.fire('SessionEnd', { sessionId: this.session.id, cwd: this.session.cwd });
+      const disconnects = [...this.mcpClients.values()].map((client) => client.disconnect().catch(() => {}));
+      await Promise.all(disconnects);
+      await this.log('runtime:shutdown', { sessionId: this.session.id, mcpClients: this.mcpClients.size });
     },
   };
 

@@ -7,6 +7,7 @@ export function matchAndBind(query, skillsMap) {
     const overlap = queryWords.filter((w) => descWords.includes(w) && w.length > 3).length;
     if (overlap >= 2) {
       return {
+        dir: skill.dir,
         name: skill.name,
         body: skill.body ?? '',
         promptAddendum: `\n\n# Active Skill: ${skill.name}\n\n${skill.body ?? ''}`,

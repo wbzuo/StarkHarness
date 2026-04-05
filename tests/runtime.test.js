@@ -385,3 +385,57 @@ test('replay-runner command produces plan and summary', async () => {
   assert.equal(replayRunner.plan.length, 1);
   assert.equal(replayRunner.summary.status, 'planned');
 });
+
+
+test('runtime.run binds matching skill into execution path', async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'starkharness-skillrun-'));
+  const skillDir = path.join(root, 'skills', 'review');
+  await writeFile(path.join(root, 'dummy.txt'), 'x', 'utf8').catch(() => {});
+  await import('node:fs/promises').then(fs => fs.mkdir(skillDir, { recursive: true }));
+  await writeFile(
+    path.join(skillDir, 'SKILL.md'),
+    `---
+name: review
+description: systematic code review with structured output
+version: 1.0.0
+---
+Review instructions here`,
+    'utf8',
+  );
+
+  const runtime = await createRuntime({
+    stateDir: path.join(root, '.starkharness'),
+    session: { cwd: root, goal: 'skill-run' },
+  });
+
+  runtime.runner.run = async ({ systemPrompt }) => ({
+    finalText: 'ok',
+    turns: [],
+    messages: [],
+    stopReason: 'end_turn',
+    usage: {},
+    _systemPrompt: systemPrompt,
+  });
+
+  const result = await runtime.run('please do a code review of src');
+  assert.equal(result.activeSkill, 'review');
+  assert.ok(result._systemPrompt.includes('Active Skill: review'));
+});
+
+test('runtime.shutdown disconnects all MCP clients', async () => {
+  const { runtime } = await makeRuntime();
+  let disconnected = 0;
+  runtime.mcpClients.set('a', { disconnect: async () => { disconnected += 1; } });
+  runtime.mcpClients.set('b', { disconnect: async () => { disconnected += 1; } });
+  await runtime.shutdown();
+  assert.equal(disconnected, 2);
+});
+
+test('completeWithStrategy uses provider capabilities from registered providers', async () => {
+  const { ProviderRegistry } = await import('../src/providers/index.js');
+  const registry = new ProviderRegistry({});
+  registry.register({ id: 'a', purpose: 'a', modelFamily: 'x', capabilities: ['chat'], async complete(req) { return { id: 'a', req }; } });
+  registry.register({ id: 'b', purpose: 'b', modelFamily: 'x', capabilities: ['chat', 'tools'], async complete(req) { return { id: 'b', req }; } });
+  const result = await registry.completeWithStrategy({ capability: 'tools', request: { prompt: 'x' }, retryOptions: { maxRetries: 1, timeout: 1000, baseDelay: 1 } });
+  assert.equal(result.id, 'b');
+});
