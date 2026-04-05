@@ -73,7 +73,7 @@ export class AgentExecutor {
             retryOptions: { maxRetries: 2, baseDelay: 50, timeout: 120000 },
           }),
       },
-      hooks: this.runtime.hooks,
+      hooks: this.runtime.hooks.fork(),
       tools,
       permissions: this.runtime.permissions,
     });

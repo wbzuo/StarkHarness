@@ -21,7 +21,6 @@ function detectCycles(tasks) {
     visiting.add(node);
     for (const dep of graph.get(node) ?? []) {
       if (graph.has(dep)) dfs(dep);
-      if (cyclic.has(dep)) cyclic.add(node);
     }
     visiting.delete(node);
     visited.add(node);

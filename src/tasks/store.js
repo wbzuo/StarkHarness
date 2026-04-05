@@ -1,13 +1,18 @@
 export class TaskStore {
   #tasks = new Map();
+  #seq = 0;
 
   constructor(initialTasks = []) {
     initialTasks.forEach((task) => this.#tasks.set(task.id, task));
+    for (const task of initialTasks) {
+      const match = String(task.id ?? '').match(/(\d+)$/);
+      if (match) this.#seq = Math.max(this.#seq, Number(match[1]));
+    }
   }
 
   create(task) {
     const next = {
-      id: task.id ?? `task-${this.#tasks.size + 1}`,
+      id: task.id ?? `task-${++this.#seq}`,
       status: task.status ?? 'pending',
       owner: task.owner ?? null,
       ...task,

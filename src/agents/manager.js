@@ -1,8 +1,14 @@
 export class AgentManager {
   #agents = new Map();
+  #seq = 0;
 
   constructor(initialAgents = []) {
     initialAgents.forEach((agent) => this.#agents.set(agent.id, agent));
+    // Restore sequence counter so auto-IDs never collide with loaded agents
+    for (const agent of initialAgents) {
+      const match = String(agent.id ?? '').match(/(\d+)$/);
+      if (match) this.#seq = Math.max(this.#seq, Number(match[1]));
+    }
   }
 
   spawn({
@@ -16,7 +22,7 @@ export class AgentManager {
     description = '',
     color = 'blue',
   } = {}) {
-    const agentId = id ?? `agent-${this.#agents.size + 1}`;
+    const agentId = id ?? `agent-${++this.#seq}`;
     const agent = {
       id: agentId,
       role,

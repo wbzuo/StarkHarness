@@ -57,6 +57,16 @@ export class HookDispatcher {
     return results.reduce((merged, r) => ({ ...merged, ...r }), { decision: 'allow' });
   }
 
+  fork() {
+    const child = new HookDispatcher();
+    for (const [event, handlers] of this.#hooks) {
+      for (const handler of handlers) {
+        child.register(event, handler);
+      }
+    }
+    return child;
+  }
+
   listEvents() {
     return [...HOOK_EVENTS];
   }

@@ -130,7 +130,7 @@ export function createCommandRegistry() {
     {
       name: 'orchestrate',
       description: 'Dispatch all ready tasks across available agents',
-      async execute(runtime) {
+      async execute(runtime, args = {}) {
         return runtime.orchestrator.runReadyTasks({
           parallel: args.parallel !== 'false',
           concurrency: args.concurrency ? Number(args.concurrency) : Infinity,
