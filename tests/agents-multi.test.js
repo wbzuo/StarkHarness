@@ -214,6 +214,121 @@ test('AgentOrchestrator restarts failed workers within the configured budget', a
   await orchestrator.stopWorker('agent-1');
 });
 
+test('AgentExecutor persists token usage across runs', async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'starkharness-usage-'));
+  const runtime = await createRuntime({ stateDir: path.join(root, '.starkharness'), session: { cwd: root, goal: 'usage' } });
+  const agent = runtime.agents.spawn({ id: 'agent-1', role: 'reviewer', description: 'tracks usage' });
+
+  // Mock provider to return known usage
+  let callCount = 0;
+  runtime.providers.completeWithStrategy = async () => {
+    callCount++;
+    return { text: `run-${callCount}`, toolCalls: [], stopReason: 'end_turn', usage: { input_tokens: 100, output_tokens: 50 } };
+  };
+
+  const task1 = runtime.tasks.create({ id: 'task-1', subject: 'first', status: 'pending' });
+  await runtime.orchestrator.runReadyTasks({ parallel: false });
+
+  const task2 = runtime.tasks.create({ id: 'task-2', subject: 'second', status: 'pending' });
+  await runtime.orchestrator.runReadyTasks({ parallel: false });
+
+  const state = await runtime.state.loadAgentState('agent-1');
+  assert.equal(state.usage.inputTokens, 200);
+  assert.equal(state.usage.outputTokens, 100);
+  assert.ok(state.lastUsage);
+  await runtime.shutdown();
+});
+
+test('TaskScheduler listFailed and requeueFailed', () => {
+  const tasks = new TaskStore([
+    { id: 'task-1', subject: 'ok', status: 'completed' },
+    { id: 'task-2', subject: 'broke', status: 'failed', error: 'boom', attempts: 3 },
+    { id: 'task-3', subject: 'also broke', status: 'failed', error: 'crash', attempts: 1 },
+  ]);
+  const agents = new AgentManager([{ id: 'agent-1', role: 'reviewer', status: 'idle' }]);
+  const scheduler = new TaskScheduler({ tasks, agents });
+
+  const failed = scheduler.listFailed();
+  assert.equal(failed.length, 2);
+
+  const requeued = scheduler.requeueFailed('task-2');
+  assert.equal(requeued.status, 'pending');
+  assert.equal(requeued.attempts, 0);
+  assert.equal(requeued.error, null);
+  assert.ok(requeued.requeuedAt);
+
+  // Should not requeue non-failed tasks
+  assert.equal(scheduler.requeueFailed('task-1'), null);
+
+  // requeueAllFailed should handle remaining
+  const all = scheduler.requeueAllFailed();
+  assert.equal(all.length, 1);
+  assert.equal(all[0].id, 'task-3');
+});
+
+test('AgentOrchestrator waitForTasks resolves when all tasks complete', async () => {
+  const tasks = new TaskStore([
+    { id: 'task-1', subject: 'a', status: 'pending' },
+    { id: 'task-2', subject: 'b', status: 'pending' },
+  ]);
+  const agents = new AgentManager([
+    { id: 'agent-1', role: 'reviewer', status: 'idle', description: 'a' },
+    { id: 'agent-2', role: 'reviewer', status: 'idle', description: 'b' },
+  ]);
+  const scheduler = new TaskScheduler({ tasks, agents });
+  const inbox = new AgentInbox();
+  const executor = {
+    execute: async (_agent, task) => {
+      await wait(5);
+      return { finalText: `done:${task.id}`, stopReason: 'end_turn' };
+    },
+  };
+  const orchestrator = new AgentOrchestrator({ agents, tasks, scheduler, executor, inbox });
+
+  // Start tasks in background
+  const runPromise = orchestrator.runReadyTasks({ concurrency: 2 });
+  const results = await orchestrator.waitForTasks(['task-1', 'task-2'], { timeoutMs: 1000, pollMs: 5 });
+  await runPromise;
+
+  assert.equal(results.length, 2);
+  assert.ok(results.every((r) => r.status === 'completed'));
+});
+
+test('AgentOrchestrator waitForTasks times out for stuck tasks', async () => {
+  const tasks = new TaskStore([{ id: 'task-1', subject: 'stuck', status: 'pending' }]);
+  const agents = new AgentManager([]);
+  const scheduler = new TaskScheduler({ tasks, agents });
+  const inbox = new AgentInbox();
+  const executor = { execute: async () => ({ finalText: 'ok', stopReason: 'end_turn' }) };
+  const orchestrator = new AgentOrchestrator({ agents, tasks, scheduler, executor, inbox });
+
+  await assert.rejects(
+    () => orchestrator.waitForTasks(['task-1'], { timeoutMs: 50, pollMs: 5 }),
+    (err) => err.name === 'TimeoutError',
+  );
+});
+
+test('AgentOrchestrator worker crash syncs agent to failed status', async () => {
+  const tasks = new TaskStore();
+  const agents = new AgentManager([{ id: 'agent-1', role: 'reviewer', status: 'idle', description: 'crasher' }]);
+  const scheduler = new TaskScheduler({ tasks, agents });
+  const inbox = new AgentInbox();
+  const executor = { executeMessage: async () => ({ finalText: 'ok', stopReason: 'end_turn' }) };
+  const orchestrator = new AgentOrchestrator({ agents, tasks, scheduler, executor, inbox });
+
+  // Make consumeWork always throw to crash the worker
+  inbox.consumeWork = () => { throw new Error('fatal-crash'); };
+
+  orchestrator.startWorker('agent-1', { pollIntervalMs: 1, maxRestarts: 0, restartDelayMs: 1 });
+  await wait(50);
+
+  const agent = agents.get('agent-1');
+  assert.equal(agent.status, 'failed');
+  assert.equal(agent.lastError, 'fatal-crash');
+  // Worker should be cleaned up from map
+  assert.equal(orchestrator.listWorkers().length, 0);
+});
+
 test('AgentExecutor supports process-isolated agents', async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), 'starkharness-process-agent-'));
   const runtime = await createRuntime({ stateDir: path.join(root, '.starkharness'), session: { cwd: root, goal: 'process-agent' } });

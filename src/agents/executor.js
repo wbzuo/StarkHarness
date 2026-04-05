@@ -74,6 +74,11 @@ export class AgentExecutor {
 
   async #persistAgent(agent, execution, result) {
     const previous = await this.runtime.state.loadAgentState(agent.id).catch(() => ({ runs: 0, completedTasks: 0, handledMessages: 0 }));
+    const prevUsage = previous.usage ?? { inputTokens: 0, outputTokens: 0 };
+    const raw = result.usage ?? {};
+    // Normalize snake_case (from runner) and camelCase usage keys
+    const curInputTokens = Number(raw.inputTokens ?? raw.input_tokens ?? 0);
+    const curOutputTokens = Number(raw.outputTokens ?? raw.output_tokens ?? 0);
     const nextState = {
       agentId: agent.id,
       runs: Number(previous.runs ?? 0) + 1,
@@ -81,6 +86,11 @@ export class AgentExecutor {
       handledMessages: Number(previous.handledMessages ?? 0) + (execution.kind === 'message' ? 1 : 0),
       lastExecution: execution,
       lastResult: result.finalText ?? '',
+      usage: {
+        inputTokens: Number(prevUsage.inputTokens ?? 0) + curInputTokens,
+        outputTokens: Number(prevUsage.outputTokens ?? 0) + curOutputTokens,
+      },
+      lastUsage: { inputTokens: curInputTokens, outputTokens: curOutputTokens },
       updatedAt: new Date().toISOString(),
     };
     await this.runtime.state.saveAgentState(agent.id, nextState);

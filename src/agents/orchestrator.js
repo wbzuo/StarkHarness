@@ -285,7 +285,19 @@ export class AgentOrchestrator {
       await this.#persistWorker(worker);
     };
 
-    worker.promise = supervise();
+    worker.promise = supervise().catch((error) => {
+      // Worker crashed beyond maxRestarts — clean up map and ensure agent status synced
+      this.#workers.delete(agentId);
+      const agent = this.agents.get(agentId);
+      if (agent && agent.status !== 'failed') {
+        this.agents.update(agentId, {
+          status: 'failed',
+          currentTaskId: null,
+          currentMessageId: null,
+          lastError: error instanceof Error ? error.message : String(error),
+        });
+      }
+    });
     this.#workers.set(agentId, worker);
     void this.#persistWorker(worker);
     return worker;
@@ -303,6 +315,28 @@ export class AgentOrchestrator {
 
   listWorkers() {
     return [...this.#workers.values()].map((worker) => this.#snapshotWorker(worker));
+  }
+
+  async waitForTasks(taskIds, { timeoutMs = 300000, pollMs = 100, signal } = {}) {
+    const ids = new Set(taskIds);
+    const terminalStatuses = new Set(['completed', 'failed', 'cancelled']);
+    const deadline = Date.now() + timeoutMs;
+
+    while (true) {
+      if (signal?.aborted) throw createAbortError();
+      const tasks = [...ids].map((id) => this.tasks.get(id)).filter(Boolean);
+      const allDone = tasks.length === ids.size && tasks.every((t) => terminalStatuses.has(t.status));
+      if (allDone) {
+        return tasks.map((t) => ({ id: t.id, status: t.status, result: t.result ?? null, error: t.error ?? null }));
+      }
+      if (Date.now() >= deadline) {
+        const pending = tasks.filter((t) => !terminalStatuses.has(t.status)).map((t) => t.id);
+        const err = new Error(`waitForTasks timeout: pending=[${pending.join(',')}]`);
+        err.name = 'TimeoutError';
+        throw err;
+      }
+      await delay(pollMs, undefined, { ref: false });
+    }
   }
 
   consumeInbox(agentId, { limit = Infinity } = {}) {

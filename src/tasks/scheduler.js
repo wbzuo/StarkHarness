@@ -106,6 +106,29 @@ export class TaskScheduler {
     });
   }
 
+  listFailed() {
+    return this.tasks.list().filter((task) => task.status === 'failed');
+  }
+
+  requeueFailed(taskId) {
+    const task = this.tasks.get(taskId);
+    if (!task || task.status !== 'failed') return null;
+    return this.tasks.update(taskId, {
+      status: 'pending',
+      error: null,
+      attempts: 0,
+      owner: null,
+      assignedAt: null,
+      failedAt: null,
+      requeuedAt: new Date().toISOString(),
+    });
+  }
+
+  requeueAllFailed() {
+    const failed = this.listFailed();
+    return failed.map((task) => this.requeueFailed(task.id)).filter(Boolean);
+  }
+
   markCancelled(taskId, reason = 'cancelled') {
     return this.tasks.update(taskId, {
       status: 'cancelled',
