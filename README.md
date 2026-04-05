@@ -3,8 +3,8 @@
 <p align="center">
   <img src="https://img.shields.io/badge/Node.js-20+-green.svg" alt="Node.js Version">
   <img src="https://img.shields.io/badge/Dependencies-Zero-blue.svg" alt="Zero Dependencies">
-  <img src="https://img.shields.io/badge/Status-Advanced%20Runtime-orange.svg" alt="Status">
-  <img src="https://img.shields.io/badge/Features-Multi--Agent%20%7C%20MCP%20%7C%20Live-blue.svg" alt="Features">
+  <img src="https://img.shields.io/badge/Tests-145%20Passed-brightgreen.svg" alt="Tests">
+  <img src="https://img.shields.io/badge/Security-Token%20Gated-blue.svg" alt="Security">
 </p>
 
 ---
@@ -52,21 +52,20 @@ Built-in support for hierarchical agent swarms:
 - **`Inbox`**: Implements an asynchronous message bus for inter-agent communication.
 - **`Executor`**: Runs dangerous or specialized turns in isolated sub-runtimes.
 
-### 🔌 2. MCP (Model Context Protocol) Support (`src/mcp/`)
-Native bridge for the Model Context Protocol:
-- **Connect** to any external MCP server (stdio, SSE).
-- **Dynamic Tool Injection**: Automatically discover and register tools from MCP servers.
-- **Resource Access**: Map remote files and data directly into the agent's context.
+### 🔌 2. Secure Bridge & WebSocket (`src/bridge/`)
+Production-ready communication layer:
+- **Auth Token Gate**: Optional security via `Authorization: Bearer` (HTTP) or `?token=` (WS).
+- **WS Subscription Model**: Topic-based (e.g., `runs`) pub/sub system for real-time agent monitoring.
+- **Streaming Context**: Full support for Server-Sent Events (SSE) and WebSocket streams.
 
 ### 🛡️ 3. Execution Sandbox (`src/runtime/sandbox.js`)
 Move beyond simple permission checks:
 - **Physical Isolation**: Optional environment isolation for `shell` and `exec` commands.
 - **Tool-Level Sandboxing**: Configurable resource limits (CPU, Memory, Time) per tool call.
 
-### 📡 4. Live Providers (`src/providers/`)
-Production-ready AI backends:
-- **Streaming Support**: Real-time `tool_use` and content blocks via Anthropic/OpenAI Live adapters.
-- **Strategy Engine**: Automatic fallback and model routing (e.g., use Sonnet for logic, Haiku for summarization).
+### 📡 4. CLI Power Modes (`src/main.js`)
+- **Pipe Mode**: Optimized for non-blocking CI/CD and script automation.
+- **JSON REPL**: Machine-readable interactive mode (`--json=true`) for IDE integration.
 
 ---
 
@@ -106,7 +105,7 @@ src/
 ├── tools/           # JSON Schema tool definitions (Built-in + MCP)
 ├── providers/       # Live adapters for Anthropic & OpenAI (Streaming)
 ├── agents/          # Orchestrator, Inbox, and specialized Executors
-├── mcp/             # Model Context Protocol bridge
+├── bridge/          # Secure HTTP/WS communication with Auth & Subscriptions
 ├── runtime/         # Execution sandbox and isolation logic
 ├── tasks/           # Scheduler and task state machine
 ├── memory/          # CLAUDE.md + Dynamic learned context
@@ -118,8 +117,8 @@ src/
 ## 🗺 Roadmap
 
 - [x] **Live Providers**: Native streaming for Anthropic & OpenAI.
+- [x] **Secure Bridge**: Auth Token Gate and WebSocket Subscription model.
 - [x] **Multi-Agent**: Orchestration and inter-agent message bus.
-- [x] **MCP Bridge**: Initial support for MCP tool discovery.
 - [ ] **Phase 1**: Full MCP 1.0 specification (Resources & Prompts).
 - [ ] **Phase 2**: TUI / REPL with syntax highlighting and multi-session tabs.
 - [ ] **Phase 3**: Distributed Trace Visualization for multi-agent debugging.
