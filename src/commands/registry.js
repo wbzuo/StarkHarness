@@ -203,13 +203,6 @@ export function createCommandRegistry() {
       },
     },
     {
-      name: 'worker-state',
-      description: 'Load persisted worker metrics for an agent',
-      async execute(runtime, args = {}) {
-        return runtime.state.loadAgentWorker(args.agent ?? args.id ?? 'agent-1');
-      },
-    },
-    {
       name: 'plugins',
       description: 'List registered plugins and capabilities',
       async execute(runtime) {
