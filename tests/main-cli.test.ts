@@ -5,10 +5,10 @@ import path from 'node:path';
 
 const mainPath = path.resolve('src/main.ts');
 
-function runCli(args, { stdin = '', timeoutMs = 2000 } = {}) {
+function runCli(args, { stdin = '', timeoutMs = 2000, cwd = process.cwd() } = {}) {
   return new Promise((resolve, reject) => {
     const child = spawn(process.execPath, ['--import', 'tsx', mainPath, ...args], {
-      cwd: process.cwd(),
+      cwd,
       stdio: ['pipe', 'pipe', 'pipe'],
     });
     let stdout = '';
@@ -48,4 +48,22 @@ test('CLI repl json mode emits structured JSON lines', async () => {
   assert.equal(first.input, 'hello from repl');
   assert.ok(first.output);
   assert.ok(first.traceId);
+});
+
+test('CLI starter-apps lists available templates', async () => {
+  const { code, stdout } = await runCli(['starter-apps']);
+  assert.equal(code, 0);
+  const apps = JSON.parse(stdout);
+  assert.ok(apps.some((app) => app.id === 'browser-research'));
+  assert.ok(apps.some((app) => app.id === 'workflow-automation'));
+});
+
+test('CLI init scaffolds a starter app into a target directory', async () => {
+  const os = await import('node:os');
+  const fs = await import('node:fs/promises');
+  const target = await fs.mkdtemp(path.join(os.tmpdir(), 'starkharness-cli-init-'));
+  const { code } = await runCli(['init', `--template=browser-research`, `--target=${target}`, '--force=true']);
+  assert.equal(code, 0);
+  const manifest = JSON.parse(await fs.readFile(path.join(target, 'starkharness.app.json'), 'utf8'));
+  assert.equal(manifest.name, 'browser-research-app');
 });

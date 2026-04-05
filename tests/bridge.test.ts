@@ -498,3 +498,27 @@ test('HTTP bridge supports fine-grained WebSocket filtering by traceId', async (
     await closeBridge(ctx);
   }
 });
+
+test('HTTP bridge blocks remote-control endpoints when remote control is disabled', async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'starkharness-bridge-locked-'));
+  const { loadRuntimeEnv } = await import('../src/config/env.js');
+  const envConfig = await loadRuntimeEnv({
+    cwd: root,
+    env: { ...process.env, STARKHARNESS_REMOTE_CONTROL: 'false' },
+  });
+  const runtime = await createRuntime({
+    stateDir: path.join(root, '.starkharness'),
+    session: { cwd: root, goal: 'bridge-locked' },
+    envConfig,
+  });
+  const bridge = await createHttpBridge(runtime, { port: 0, host: '127.0.0.1' });
+
+  try {
+    const res = await fetch(`${bridge.url}/registry`);
+    assert.equal(res.status, 403);
+    const body = await res.json();
+    assert.equal(body.error, 'remote-control-disabled');
+  } finally {
+    await closeBridge({ runtime, bridge });
+  }
+});
