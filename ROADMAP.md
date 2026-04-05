@@ -170,14 +170,15 @@ Status: planned
 Goal:
 
 - Make the platform operable in enterprise-style environments
+- Complete the enterprise loop of operations, observability, and control
 
 Included:
 
-- Enterprise monitoring/reporting
+- Enterprise-grade monitoring and reporting
 - Custom Sentry error reporting
 - Custom GrowthBook integration
 - More mature Remote Control
-- Feature-flag / rollout platform support
+- Formal feature-flag / rollout platform support
 - Missing-tool completion and controlled restriction removal
 
 Explicitly not in scope:
@@ -190,6 +191,7 @@ Exit criteria:
 - The runtime can be observed, controlled, and rolled out safely in team environments
 - Error reporting and remote config are pluggable
 - Feature behavior can be governed externally
+- The V5 surface is clearly operable, observable, and controllable in production-style environments
 
 ## V6.0 — Re-Architect
 
