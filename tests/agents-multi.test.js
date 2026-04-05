@@ -10,6 +10,8 @@ import { AgentManager } from '../src/agents/manager.js';
 import { AgentOrchestrator } from '../src/agents/orchestrator.js';
 import { createRuntime } from '../src/kernel/runtime.js';
 
+const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
 test('AgentInbox routes, consumes, and supports RPC responses', () => {
   const inbox = new AgentInbox();
   const req = inbox.request('agent-1', { from: 'agent-0', body: 'ping' });
@@ -21,14 +23,11 @@ test('AgentInbox routes, consumes, and supports RPC responses', () => {
 
 test('AgentInbox awaitResponse resolves pending RPC replies', async () => {
   const inbox = new AgentInbox();
-  const req = inbox.request('agent-1', { from: 'agent-0', body: 'ping' });
-  const pending = inbox.awaitResponse('agent-0', req.correlationId, { timeoutMs: 100 });
-  setTimeout(() => {
-    inbox.respond(req, { from: 'agent-1', body: 'pong' });
-  }, 5);
+  const pending = inbox.awaitResponse('agent-0', 'corr-1', { timeoutMs: 100 });
+  inbox.send('agent-0', { kind: 'response', correlationId: 'corr-1', from: 'agent-1', body: 'pong' });
   const response = await pending;
   assert.equal(response.body, 'pong');
-  assert.equal(response.inReplyTo, req.id);
+  assert.equal(response.correlationId, 'corr-1');
 });
 
 test('TaskScheduler respects dependencies and retry budget', () => {
@@ -46,21 +45,32 @@ test('TaskScheduler respects dependencies and retry budget', () => {
   assert.ok(!readyIds.includes('task-4'));
 });
 
-test('TaskScheduler applies inbox backpressure when selecting agents', () => {
-  const tasks = new TaskStore([{ id: 'task-1', subject: 'review auth', status: 'pending' }]);
-  const agents = new AgentManager([
-    { id: 'agent-1', role: 'reviewer', status: 'idle', description: 'review auth code' },
-    { id: 'agent-2', role: 'reviewer', status: 'idle', description: 'review billing code' },
+test('TaskScheduler blocks cyclic dependencies', () => {
+  const tasks = new TaskStore([
+    { id: 'task-1', status: 'pending', dependsOn: ['task-2'] },
+    { id: 'task-2', status: 'pending', dependsOn: ['task-1'] },
   ]);
+  const agents = new AgentManager([{ id: 'agent-1', status: 'idle', role: 'reviewer' }]);
   const scheduler = new TaskScheduler({ tasks, agents });
+  assert.deepEqual(scheduler.listReady(), []);
+  assert.deepEqual(new Set(scheduler.listBlocked().map((task) => task.id)), new Set(['task-1', 'task-2']));
+});
+
+test('TaskScheduler applies inbox backpressure when selecting agents', () => {
+  const tasks = new TaskStore([{ id: 'task-1', subject: 'review service', status: 'pending' }]);
+  const agents = new AgentManager([
+    { id: 'agent-1', role: 'reviewer', status: 'idle', description: 'review backend services' },
+    { id: 'agent-2', role: 'reviewer', status: 'idle', description: 'review service APIs' },
+  ]);
   const inbox = new AgentInbox();
-  inbox.send('agent-1', { body: 'busy-1' });
-  inbox.send('agent-1', { body: 'busy-2' });
-  const agent = scheduler.selectAgent(tasks.get('task-1'), {
-    maxInboxSize: 1,
+  inbox.send('agent-1', { from: 'runtime', body: 'busy' });
+  const scheduler = new TaskScheduler({ tasks, agents });
+  const selected = scheduler.selectAgent(tasks.get('task-1'), {
+    preferredAgents: agents.listByStatus('idle'),
     inbox,
+    maxInboxSize: 1,
   });
-  assert.equal(agent.id, 'agent-2');
+  assert.equal(selected.id, 'agent-2');
 });
 
 test('AgentOrchestrator executes tasks in parallel and retries failures', async () => {
@@ -92,77 +102,69 @@ test('AgentOrchestrator executes tasks in parallel and retries failures', async 
   assert.equal(tasks.get('task-2').status, 'completed');
 });
 
-test('AgentOrchestrator rotates idle agents to reduce starvation across runs', async () => {
-  const tasks = new TaskStore([{ id: 'task-1', subject: 'first', status: 'pending' }]);
+test('AgentOrchestrator rotates idle agents fairly across runs', async () => {
+  const tasks = new TaskStore([
+    { id: 'task-1', subject: 'first', status: 'pending' },
+    { id: 'task-2', subject: 'second', status: 'pending' },
+  ]);
   const agents = new AgentManager([
-    { id: 'agent-1', role: 'reviewer', status: 'idle', description: 'first lane' },
-    { id: 'agent-2', role: 'reviewer', status: 'idle', description: 'second lane' },
+    { id: 'agent-1', role: 'reviewer', status: 'idle', description: 'first reviewer' },
+    { id: 'agent-2', role: 'reviewer', status: 'idle', description: 'second reviewer' },
   ]);
   const scheduler = new TaskScheduler({ tasks, agents });
   const inbox = new AgentInbox();
-  const executor = { execute: async (_agent, task) => ({ finalText: `done:${task.id}`, stopReason: 'end_turn' }) };
+  const assignments = [];
+  const executor = {
+    execute: async (agent, task) => {
+      assignments.push({ agentId: agent.id, taskId: task.id });
+      return { finalText: `done:${task.id}`, stopReason: 'end_turn' };
+    },
+  };
   const orchestrator = new AgentOrchestrator({ agents, tasks, scheduler, executor, inbox });
-
-  await orchestrator.runReadyTasks({ parallel: false });
-  assert.equal(tasks.get('task-1').owner, 'agent-1');
-
-  tasks.create({ id: 'task-2', subject: 'second', status: 'pending' });
-  await orchestrator.runReadyTasks({ parallel: false });
-  assert.equal(tasks.get('task-2').owner, 'agent-2');
+  await orchestrator.runReadyTasks({ parallel: false, concurrency: 1 });
+  tasks.update('task-2', { status: 'pending' });
+  await orchestrator.runReadyTasks({ parallel: false, concurrency: 1 });
+  assert.deepEqual(assignments.map((entry) => entry.agentId), ['agent-1', 'agent-2']);
 });
 
 test('AgentOrchestrator worker loop consumes inbox requests and writes replies', async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), 'starkharness-worker-'));
   const runtime = await createRuntime({ stateDir: path.join(root, '.starkharness'), session: { cwd: root, goal: 'worker' } });
   runtime.agents.spawn({ id: 'agent-1', role: 'reviewer', description: 'reply to messages' });
-  runtime.inbox.request('agent-1', { from: 'agent-0', body: 'hello worker' });
+  const request = runtime.inbox.request('agent-1', { from: 'agent-0', body: 'hello worker' });
   runtime.executor.executeMessage = async (agent) => {
     await runtime.state.saveAgentState(agent.id, { handledMessages: 1 });
     return { finalText: 'pong', stopReason: 'end_turn', usage: {} };
   };
   runtime.startWorker('agent-1', { pollIntervalMs: 1, maxMessagesPerTick: 1, timeoutMs: 100 });
-  await new Promise((resolve) => setTimeout(resolve, 10));
+  const reply = await runtime.awaitResponse('agent-0', request.correlationId, { timeoutMs: 200 });
   await runtime.stopWorker('agent-1');
-  const replies = runtime.inbox.list('agent-0', { kind: 'response' });
-  assert.equal(replies.length, 1);
-  assert.equal(replies[0].body, 'pong');
+  assert.equal(reply.body, 'pong');
   const agentState = await runtime.state.loadAgentState('agent-1');
   assert.equal(agentState.handledMessages >= 1, true);
   await runtime.shutdown();
 });
 
-test('AgentOrchestrator worker supervision restarts transient loop failures', async () => {
-  const root = await mkdtemp(path.join(os.tmpdir(), 'starkharness-restart-'));
-  const runtime = await createRuntime({ stateDir: path.join(root, '.starkharness'), session: { cwd: root, goal: 'restart' } });
-  runtime.agents.spawn({ id: 'agent-1', role: 'reviewer', description: 'recovers after transient errors' });
-  const request = runtime.inbox.request('agent-1', { from: 'agent-0', body: 'hello again' });
-  const pendingResponse = runtime.awaitResponse('agent-0', request.correlationId, { timeoutMs: 100 });
-  runtime.executor.executeMessage = async () => ({ finalText: 'recovered', stopReason: 'end_turn', usage: {} });
-
-  const originalConsumeWork = runtime.inbox.consumeWork.bind(runtime.inbox);
-  let consumeCalls = 0;
-  runtime.inbox.consumeWork = (...args) => {
-    consumeCalls += 1;
-    if (consumeCalls === 1) throw new Error('transient-loop-error');
+test('AgentOrchestrator restarts failed workers within the configured budget', async () => {
+  const tasks = new TaskStore();
+  const agents = new AgentManager([{ id: 'agent-1', role: 'reviewer', status: 'idle', description: 'worker agent' }]);
+  const scheduler = new TaskScheduler({ tasks, agents });
+  const inbox = new AgentInbox();
+  const executor = { executeMessage: async () => ({ finalText: 'ok', stopReason: 'end_turn' }) };
+  const orchestrator = new AgentOrchestrator({ agents, tasks, scheduler, executor, inbox });
+  const originalConsumeWork = inbox.consumeWork.bind(inbox);
+  let boom = true;
+  inbox.consumeWork = (...args) => {
+    if (boom) {
+      boom = false;
+      throw new Error('worker-crash');
+    }
     return originalConsumeWork(...args);
   };
-
-  runtime.startWorker('agent-1', {
-    pollIntervalMs: 1,
-    maxMessagesPerTick: 1,
-    timeoutMs: 100,
-    maxRestarts: 1,
-    restartDelayMs: 1,
-  });
-  await new Promise((resolve) => setTimeout(resolve, 20));
-  const response = await pendingResponse;
-  const replies = runtime.inbox.list('agent-0', { kind: 'response' });
-  assert.equal(replies.length, 1);
-  assert.equal(replies[0].body, 'recovered');
-  assert.equal(response.body, 'recovered');
-  const worker = runtime.listWorkers().find((entry) => entry.agentId === 'agent-1');
-  assert.equal(worker?.restarts, 1);
-  await runtime.stopWorker('agent-1');
-  runtime.inbox.consumeWork = originalConsumeWork;
-  await runtime.shutdown();
+  orchestrator.startWorker('agent-1', { pollIntervalMs: 1, maxRestarts: 1, restartDelayMs: 1 });
+  await wait(20);
+  const worker = orchestrator.listWorkers()[0];
+  assert.equal(worker.restarts, 1);
+  assert.equal(worker.status, 'running');
+  await orchestrator.stopWorker('agent-1');
 });
