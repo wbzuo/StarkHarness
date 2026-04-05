@@ -48,7 +48,13 @@ export async function startRepl(runtime, { json = false, outputStream = output }
 
   try {
     while (true) {
-      const line = (await rl.question(prompt)).trim();
+      let line;
+      try {
+        line = (await rl.question(prompt)).trim();
+      } catch (error) {
+        if (error?.code === 'ERR_USE_AFTER_CLOSE') break;
+        throw error;
+      }
       if (!line) continue;
       if (line === 'exit' || line === 'quit') break;
       try {
@@ -85,6 +91,7 @@ export async function startRepl(runtime, { json = false, outputStream = output }
     }
   } finally {
     rl.close();
+    input.pause();
   }
   return transcript;
 }

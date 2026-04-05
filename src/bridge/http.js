@@ -100,13 +100,38 @@ function writeSse(res, payload, eventName = null) {
   res.write(`data: ${JSON.stringify(payload)}\n\n`);
 }
 
-export async function createHttpBridge(runtime, { port = 3000, host = '127.0.0.1' } = {}) {
+function sendWebSocket(socket, event) {
+  socket.write(encodeWsFrame(JSON.stringify(event)));
+}
+
+function sendWebSocketError(socket, error) {
+  sendWebSocket(socket, { type: 'error', error: error instanceof Error ? error.message : String(error) });
+}
+
+function extractBearerToken(req, url) {
+  const authHeader = req.headers.authorization;
+  if (typeof authHeader === 'string' && authHeader.startsWith('Bearer ')) {
+    return authHeader.slice('Bearer '.length);
+  }
+  const explicitHeader = req.headers['x-stark-token'];
+  if (typeof explicitHeader === 'string') return explicitHeader;
+  return url.searchParams.get('token');
+}
+
+function isAuthorized(req, url, authToken) {
+  if (!authToken) return true;
+  if (url.pathname === '/health') return true;
+  return extractBearerToken(req, url) === authToken;
+}
+
+export async function createHttpBridge(runtime, { port = 3000, host = '127.0.0.1', authToken = null } = {}) {
   const wsClients = new Map();
 
-  function broadcast(event) {
+  function broadcast(event, { topic = 'runs' } = {}) {
     const frame = encodeWsFrame(JSON.stringify(event));
-    for (const [id, socket] of wsClients) {
-      try { socket.write(frame); }
+    for (const [id, client] of wsClients) {
+      if (!client.topics.has('*') && !client.topics.has(topic)) continue;
+      try { client.socket.write(frame); }
       catch { wsClients.delete(id); }
     }
   }
@@ -116,6 +141,7 @@ export async function createHttpBridge(runtime, { port = 3000, host = '127.0.0.1
     const path = url.pathname;
 
     if (req.method === 'OPTIONS') return cors(res);
+    if (!isAuthorized(req, url, authToken)) return json(res, { error: 'unauthorized' }, 401);
 
     try {
       // Health check
@@ -128,13 +154,19 @@ export async function createHttpBridge(runtime, { port = 3000, host = '127.0.0.1
         const body = await parseBody(req);
         const prompt = body.prompt ?? body.message ?? '';
         if (!prompt) return json(res, { error: 'prompt is required' }, 400);
+        const requestId = randomBytes(8).toString('hex');
 
         const result = await runtime.run(prompt, {
           onTextChunk(chunk) {
-            broadcast({ type: 'chunk', chunk, timestamp: Date.now() });
+            broadcast({ type: 'chunk', chunk, requestId, timestamp: Date.now() }, { topic: 'runs' });
           },
         });
-        broadcast({ type: 'complete', traceId: result.traceId, turns: result.turns?.length ?? 0 });
+        broadcast({
+          type: 'complete',
+          requestId,
+          traceId: result.traceId,
+          turns: result.turns?.length ?? 0,
+        }, { topic: 'runs' });
         return json(res, {
           finalText: result.finalText,
           turns: result.turns?.length ?? 0,
@@ -226,14 +258,20 @@ export async function createHttpBridge(runtime, { port = 3000, host = '127.0.0.1
 
   // WebSocket upgrade
   server.on('upgrade', (req, socket, head) => {
-    if (req.url !== '/ws') {
+    const url = new URL(req.url, `http://${req.headers.host ?? `${host}:${port}`}`);
+    if (url.pathname !== '/ws') {
+      socket.destroy();
+      return;
+    }
+    if (!isAuthorized(req, url, authToken)) {
+      socket.write('HTTP/1.1 401 Unauthorized\r\nConnection: close\r\n\r\n');
       socket.destroy();
       return;
     }
     const ws = acceptWebSocket(req, socket, head);
     if (!ws) return;
     const clientId = randomBytes(8).toString('hex');
-    wsClients.set(clientId, ws);
+    wsClients.set(clientId, { socket: ws, topics: new Set() });
 
     let buffer = Buffer.alloc(0);
     ws.on('data', async (data) => {
@@ -250,25 +288,43 @@ export async function createHttpBridge(runtime, { port = 3000, host = '127.0.0.1
         if (frame.opcode === 1) { // text
           try {
             const msg = JSON.parse(frame.data.toString('utf8'));
+            if (msg.type === 'subscribe') {
+              const topics = Array.isArray(msg.topics) ? msg.topics.filter((topic) => typeof topic === 'string' && topic) : [];
+              const client = wsClients.get(clientId);
+              if (client) client.topics = new Set(topics);
+              sendWebSocket(ws, { type: 'subscribed', clientId, topics });
+              continue;
+            }
+            if (msg.type === 'unsubscribe') {
+              const topics = Array.isArray(msg.topics) ? msg.topics.filter((topic) => typeof topic === 'string' && topic) : [];
+              const client = wsClients.get(clientId);
+              if (client) {
+                for (const topic of topics) client.topics.delete(topic);
+                sendWebSocket(ws, { type: 'subscribed', clientId, topics: [...client.topics] });
+              }
+              continue;
+            }
             if (msg.type === 'run' && msg.prompt) {
+              const requestId = msg.requestId ?? randomBytes(8).toString('hex');
               const result = await runtime.run(msg.prompt, {
                 onTextChunk(chunk) {
-                  try { ws.write(encodeWsFrame(JSON.stringify({ type: 'chunk', chunk }))); } catch {}
+                  try { sendWebSocket(ws, { type: 'chunk', chunk, requestId }); } catch {}
                 },
               });
-              ws.write(encodeWsFrame(JSON.stringify({
+              sendWebSocket(ws, {
                 type: 'complete',
+                requestId,
                 finalText: result.finalText,
                 turns: result.turns?.length ?? 0,
                 usage: result.usage,
                 traceId: result.traceId,
-              })));
+              });
             } else if (msg.type === 'command') {
               const result = await runtime.dispatchCommand(msg.name, msg.args ?? {});
-              ws.write(encodeWsFrame(JSON.stringify({ type: 'command-result', name: msg.name, result })));
+              sendWebSocket(ws, { type: 'command-result', name: msg.name, result });
             }
           } catch (err) {
-            ws.write(encodeWsFrame(JSON.stringify({ type: 'error', error: err.message })));
+            sendWebSocketError(ws, err);
           }
         }
       }
@@ -276,7 +332,7 @@ export async function createHttpBridge(runtime, { port = 3000, host = '127.0.0.1
     ws.on('close', () => wsClients.delete(clientId));
     ws.on('error', () => wsClients.delete(clientId));
 
-    ws.write(encodeWsFrame(JSON.stringify({ type: 'connected', clientId, sessionId: runtime.session.id })));
+    sendWebSocket(ws, { type: 'connected', clientId, sessionId: runtime.session.id, topics: [] });
   });
 
   return new Promise((resolve, reject) => {
@@ -296,7 +352,7 @@ export async function createHttpBridge(runtime, { port = 3000, host = '127.0.0.1
         wsUrl: `ws://${host}:${addr.port}/ws`,
         clientCount: () => wsClients.size,
         close: () => new Promise((r) => {
-          for (const ws of wsClients.values()) try { ws.end(); } catch {}
+          for (const client of wsClients.values()) try { client.socket.end(); } catch {}
           wsClients.clear();
           server.close(r);
         }),

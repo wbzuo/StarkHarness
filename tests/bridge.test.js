@@ -8,13 +8,13 @@ import { randomBytes } from 'node:crypto';
 import { createRuntime } from '../src/kernel/runtime.js';
 import { createHttpBridge } from '../src/bridge/http.js';
 
-async function makeBridge() {
+async function makeBridge(options = {}) {
   const root = await mkdtemp(path.join(os.tmpdir(), 'starkharness-bridge-'));
   const runtime = await createRuntime({
     stateDir: path.join(root, '.starkharness'),
     session: { cwd: root, goal: 'bridge-test' },
   });
-  const bridge = await createHttpBridge(runtime, { port: 0, host: '127.0.0.1' });
+  const bridge = await createHttpBridge(runtime, { port: 0, host: '127.0.0.1', ...options });
   return { runtime, bridge };
 }
 
@@ -40,6 +40,114 @@ function parseSsePayloads(raw) {
       const data = dataLine ? JSON.parse(dataLine.slice('data:'.length).trim()) : null;
       return { event, data };
     });
+}
+
+function encodeClientFrame(data) {
+  const payload = Buffer.from(data, 'utf8');
+  const mask = randomBytes(4);
+  const header = [0x81];
+  if (payload.length < 126) {
+    header.push(0x80 | payload.length);
+  } else {
+    throw new Error('test-frame-too-large');
+  }
+  const masked = Buffer.from(payload);
+  for (let index = 0; index < masked.length; index += 1) {
+    masked[index] ^= mask[index % 4];
+  }
+  return Buffer.concat([Buffer.from(header), mask, masked]);
+}
+
+function decodeServerFrame(buffer) {
+  if (buffer.length < 2) return null;
+  let length = buffer[1] & 0x7f;
+  let offset = 2;
+  if (length === 126) {
+    if (buffer.length < 4) return null;
+    length = buffer.readUInt16BE(2);
+    offset = 4;
+  } else if (length === 127) {
+    if (buffer.length < 10) return null;
+    length = Number(buffer.readBigUInt64BE(2));
+    offset = 10;
+  }
+  if (buffer.length < offset + length) return null;
+  return {
+    text: buffer.slice(offset, offset + length).toString('utf8'),
+    totalLength: offset + length,
+  };
+}
+
+async function connectWs(wsUrl, { token } = {}) {
+  const url = new URL(wsUrl);
+  if (token) url.searchParams.set('token', token);
+  const key = randomBytes(16).toString('base64');
+  const socket = net.createConnection({ host: url.hostname, port: Number(url.port) });
+  let buffer = Buffer.alloc(0);
+  const queue = [];
+  let waiter = null;
+
+  function flush() {
+    while (true) {
+      const split = buffer.indexOf('\r\n\r\n');
+      if (split >= 0) {
+        buffer = buffer.slice(split + 4);
+      }
+      const frame = decodeServerFrame(buffer);
+      if (!frame) break;
+      buffer = buffer.slice(frame.totalLength);
+      const payload = JSON.parse(frame.text);
+      if (waiter) {
+        const resolve = waiter;
+        waiter = null;
+        resolve(payload);
+      } else {
+        queue.push(payload);
+      }
+    }
+  }
+
+  socket.on('data', (chunk) => {
+    buffer = Buffer.concat([buffer, chunk]);
+    flush();
+  });
+
+  await new Promise((resolve, reject) => {
+    socket.once('connect', resolve);
+    socket.once('error', reject);
+  });
+
+  socket.write(`GET ${url.pathname}${url.search} HTTP/1.1\r\nHost: ${url.hostname}:${url.port}\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: ${key}\r\nSec-WebSocket-Version: 13\r\n\r\n`);
+
+  return {
+    async nextMessage(timeoutMs = 1000) {
+      if (queue.length > 0) return queue.shift();
+      return new Promise((resolve, reject) => {
+        const timer = setTimeout(() => {
+          waiter = null;
+          reject(new Error('ws-timeout'));
+        }, timeoutMs);
+        waiter = (payload) => {
+          clearTimeout(timer);
+          resolve(payload);
+        };
+      });
+    },
+    async nextMessageOfType(type, timeoutMs = 1000) {
+      const startedAt = Date.now();
+      while (true) {
+        const remaining = Math.max(1, timeoutMs - (Date.now() - startedAt));
+        const message = await this.nextMessage(remaining);
+        if (message.type === type) return message;
+      }
+    },
+    send(message) {
+      socket.write(encodeClientFrame(JSON.stringify(message)));
+    },
+    close() {
+      socket.end();
+    },
+  };
 }
 
 test('HTTP bridge serves health endpoint', async () => {
@@ -163,36 +271,84 @@ test('HTTP bridge emits SSE error events when runtime.run fails', async () => {
   }
 });
 
-test('HTTP bridge upgrades websocket clients and sends connected event', async () => {
+test('HTTP bridge websocket subscriptions gate broadcast traffic', async () => {
   const ctx = await makeBridge();
   try {
-    const { hostname, port, pathname } = new URL(ctx.bridge.wsUrl);
-    const key = randomBytes(16).toString('base64');
-    const result = await new Promise((resolve, reject) => {
-      const socket = net.createConnection({ host: hostname, port: Number(port) });
-      let response = '';
-      const timer = setTimeout(() => {
-        socket.destroy();
-        reject(new Error('ws-timeout'));
-      }, 1000);
+    const passive = await connectWs(ctx.bridge.wsUrl);
+    assert.equal((await passive.nextMessage()).type, 'connected');
 
-      socket.on('data', (chunk) => {
-        response += chunk.toString('latin1');
-        if (response.includes('\r\n\r\n') && response.includes('"type":"connected"')) {
-          clearTimeout(timer);
-          socket.end();
-          resolve(response);
-        }
-      });
-      socket.on('error', (error) => {
-        clearTimeout(timer);
-        reject(error);
-      });
-      socket.write(`GET ${pathname} HTTP/1.1\r\nHost: ${hostname}:${port}\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: ${key}\r\nSec-WebSocket-Version: 13\r\n\r\n`);
+    const res = await fetch(`${ctx.bridge.url}/run`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prompt: 'hello over http' }),
     });
+    await res.json();
+    const passiveResult = await Promise.race([
+      passive.nextMessage(50).then(() => 'message').catch(() => 'timeout'),
+      new Promise((resolve) => setTimeout(() => resolve('timeout'), 75)),
+    ]);
+    assert.equal(passiveResult, 'timeout');
+    passive.close();
 
-    assert.ok(result.includes('101 Switching Protocols'));
-    assert.ok(result.includes('"type":"connected"'));
+    const subscriber = await connectWs(ctx.bridge.wsUrl);
+    assert.equal((await subscriber.nextMessage()).type, 'connected');
+    subscriber.send({ type: 'subscribe', topics: ['runs'] });
+    const subscribed = await subscriber.nextMessageOfType('subscribed');
+    assert.equal(subscribed.type, 'subscribed');
+    assert.deepEqual(subscribed.topics, ['runs']);
+
+    const subscribedRun = await fetch(`${ctx.bridge.url}/run`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prompt: 'hello over http' }),
+    });
+    const result = await subscribedRun.json();
+    const firstEvent = await subscriber.nextMessageOfType('chunk');
+    const secondEvent = await subscriber.nextMessageOfType('complete');
+
+    assert.equal(result.traceId != null, true);
+    assert.equal(firstEvent.type, 'chunk');
+    assert.equal(secondEvent.type, 'complete');
+    assert.equal(secondEvent.traceId, result.traceId);
+    subscriber.close();
+  } finally {
+    await closeBridge(ctx);
+  }
+});
+
+test('HTTP bridge websocket clients can issue run commands directly', async () => {
+  const ctx = await makeBridge();
+  try {
+    const client = await connectWs(ctx.bridge.wsUrl);
+    assert.equal((await client.nextMessage()).type, 'connected');
+    client.send({ type: 'run', prompt: 'hello websocket', requestId: 'req-1' });
+    const chunk = await client.nextMessageOfType('chunk');
+    const complete = await client.nextMessageOfType('complete');
+    assert.equal(chunk.type, 'chunk');
+    assert.equal(chunk.requestId, 'req-1');
+    assert.equal(complete.type, 'complete');
+    assert.equal(complete.requestId, 'req-1');
+    client.close();
+  } finally {
+    await closeBridge(ctx);
+  }
+});
+
+test('HTTP bridge enforces optional auth token on HTTP and websocket routes', async () => {
+  const ctx = await makeBridge({ authToken: 'secret-token' });
+  try {
+    const unauthorized = await fetch(`${ctx.bridge.url}/providers`);
+    assert.equal(unauthorized.status, 401);
+
+    const authorized = await fetch(`${ctx.bridge.url}/providers`, {
+      headers: { Authorization: 'Bearer secret-token' },
+    });
+    assert.equal(authorized.status, 200);
+
+    const client = await connectWs(ctx.bridge.wsUrl, { token: 'secret-token' });
+    const connected = await client.nextMessage();
+    assert.equal(connected.type, 'connected');
+    client.close();
   } finally {
     await closeBridge(ctx);
   }

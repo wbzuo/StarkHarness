@@ -11,6 +11,14 @@ function parseCommandArgs(argv) {
   return parsed;
 }
 
+async function finalizeCli(runtime, code = 0) {
+  process.stdin.pause();
+  await runtime.shutdown().catch(() => {});
+  await new Promise((resolve) => process.stdout.write('', resolve));
+  await new Promise((resolve) => process.stderr.write('', resolve));
+  process.exit(code);
+}
+
 async function main(argv = process.argv.slice(2)) {
   const command = argv[0] ?? 'blueprint';
   const commandArg = argv[1];
@@ -29,8 +37,7 @@ async function main(argv = process.argv.slice(2)) {
   if (command === 'repl' || command === 'chat') {
     const { startRepl } = await import('./ui/repl.js');
     await startRepl(runtime, { json: extraArgs.json === 'true' });
-    await runtime.shutdown();
-    return;
+    await finalizeCli(runtime, 0);
   }
 
   // HTTP/WebSocket server mode
@@ -38,7 +45,8 @@ async function main(argv = process.argv.slice(2)) {
     const { createHttpBridge } = await import('./bridge/http.js');
     const port = Number(extraArgs.port ?? 3000);
     const host = extraArgs.host ?? '127.0.0.1';
-    const bridge = await createHttpBridge(runtime, { port, host });
+    const authToken = extraArgs.token ?? process.env.STARKHARNESS_BRIDGE_TOKEN ?? null;
+    const bridge = await createHttpBridge(runtime, { port, host, authToken });
     console.log(`StarkHarness server listening on ${bridge.url}`);
     console.log(`WebSocket: ${bridge.wsUrl}`);
     console.log(`POST /run { "prompt": "..." } to chat`);
@@ -58,8 +66,7 @@ async function main(argv = process.argv.slice(2)) {
     for await (const chunk of process.stdin) input += chunk;
     const result = await runtime.run(input.trim());
     console.log(JSON.stringify(result, null, extraArgs.pretty === 'true' ? 2 : undefined));
-    await runtime.shutdown();
-    return;
+    await finalizeCli(runtime, 0);
   }
 
   try {
@@ -73,6 +80,8 @@ async function main(argv = process.argv.slice(2)) {
   } catch (error) {
     console.error(error instanceof Error ? error.message : String(error));
     process.exitCode = 1;
+  } finally {
+    await finalizeCli(runtime, process.exitCode ?? 0);
   }
 }
 
