@@ -65,4 +65,8 @@ export class AgentManager {
   snapshot() {
     return this.list();
   }
+
+  listByStatus(status) {
+    return this.list().filter((agent) => (agent.status ?? 'idle') === status);
+  }
 }

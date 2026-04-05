@@ -37,6 +37,7 @@ function createSessionSummary(runtime) {
     tasks: runtime.tasks.list().length,
     agents: runtime.agents.list().length,
     messages: (runtime.session.messages ?? []).length,
+    queuedMessages: runtime.inbox.list(runtime.session.id).length,
   };
 }
 
@@ -124,6 +125,28 @@ export function createCommandRegistry() {
       description: 'List persisted agents',
       async execute(runtime) {
         return runtime.agents.list();
+      },
+    },
+    {
+      name: 'orchestrate',
+      description: 'Dispatch all ready tasks across available agents',
+      async execute(runtime) {
+        return runtime.orchestrator.runReadyTasks();
+      },
+    },
+    {
+      name: 'inbox',
+      description: 'List inbox messages for an agent',
+      async execute(runtime, args = {}) {
+        return runtime.inbox.list(args.agent ?? args.id ?? 'agent-1');
+      },
+    },
+    {
+      name: 'repl',
+      description: 'Start the interactive StarkHarness REPL',
+      async execute(runtime) {
+        const { startRepl } = await import('../ui/repl.js');
+        return startRepl(runtime);
       },
     },
     {

@@ -31,4 +31,9 @@ export class TaskStore {
   snapshot() {
     return this.list();
   }
+
+  get(id) {
+    return this.#tasks.get(id);
+  }
 }
+

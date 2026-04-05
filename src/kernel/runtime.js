@@ -7,7 +7,11 @@ import { createContextEnvelope } from './context.js';
 import { createSession } from './session.js';
 import { PermissionEngine } from '../permissions/engine.js';
 import { TaskStore } from '../tasks/store.js';
+import { TaskScheduler } from '../tasks/scheduler.js';
 import { AgentManager } from '../agents/manager.js';
+import { AgentInbox } from '../agents/inbox.js';
+import { AgentExecutor } from '../agents/executor.js';
+import { AgentOrchestrator } from '../agents/orchestrator.js';
 import { PluginLoader } from '../plugins/loader.js';
 import { ProviderRegistry, createProviderBlueprint } from '../providers/index.js';
 import { loadProviderConfig } from '../providers/config.js';
@@ -33,6 +37,7 @@ function createSnapshot(runtime) {
     session: runtime.session,
     tasks: runtime.tasks.snapshot(),
     agents: runtime.agents.snapshot(),
+    inbox: runtime.inbox.snapshot(),
     permissions: runtime.permissions.snapshot(),
     plugins: runtime.plugins.snapshot(),
   };
@@ -47,8 +52,8 @@ export async function createRuntime(options = {}) {
     ? await state.loadSession(options.resumeSessionId)
     : null;
   const runtimeSnapshot = options.resumeSessionId
-    ? await state.loadRuntimeSnapshot().catch(() => ({ tasks: [], agents: [], permissions: {}, plugins: [] }))
-    : { tasks: [], agents: [], permissions: {}, plugins: [] };
+    ? await state.loadRuntimeSnapshot().catch(() => ({ tasks: [], agents: [], inbox: {}, permissions: {}, plugins: [] }))
+    : { tasks: [], agents: [], inbox: {}, permissions: {}, plugins: [] };
   const filePolicy = await loadPolicyFile(options.policyPath, { includeDefaults: false });
   const providerConfig = await loadProviderConfig(options.providerConfigPath);
   const profilePolicy = getSandboxProfile(options.sandboxProfile);
@@ -59,6 +64,7 @@ export async function createRuntime(options = {}) {
   const permissions = new PermissionEngine({ ...runtimeSnapshot.permissions, ...policy, ...options.permissions });
   const tasks = new TaskStore(runtimeSnapshot.tasks ?? []);
   const agents = new AgentManager(runtimeSnapshot.agents ?? []);
+  const inbox = new AgentInbox(runtimeSnapshot.inbox ?? {});
   const plugins = new PluginLoader(runtimeSnapshot.plugins ?? []);
   const providers = new ProviderRegistry(providerConfig);
   const tools = new ToolRegistry();
@@ -154,6 +160,7 @@ export async function createRuntime(options = {}) {
 
   // Agent loop
   const loop = new AgentLoop({ hooks, tools, permissions });
+  const scheduler = new TaskScheduler({ tasks, agents });
 
   // Agent runner for multi-turn LLM conversations
   const runner = new AgentRunner({
@@ -180,6 +187,7 @@ export async function createRuntime(options = {}) {
     permissions,
     tasks,
     agents,
+    inbox,
     plugins,
     mcpClients,
     providers,
@@ -196,6 +204,9 @@ export async function createRuntime(options = {}) {
     workspace: createWorkspaceBlueprint(),
     bridge: createBridgeBlueprint(),
     ui: createReplBlueprint(),
+    scheduler,
+    executor: null,
+    orchestrator: null,
     async persist() {
       await this.state.saveSession(this.session);
       await this.state.saveRuntimeSnapshot(createSnapshot(this));
@@ -267,6 +278,8 @@ export async function createRuntime(options = {}) {
     },
   };
 
+  runtime.executor = new AgentExecutor(runtime);
+  runtime.orchestrator = new AgentOrchestrator({ agents, tasks, scheduler, executor: runtime.executor, inbox });
   loop.setRuntime(runtime);
   runner.setRuntime(runtime);
   await runtime.persist();

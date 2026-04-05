@@ -207,6 +207,7 @@ export function createBuiltinTools() {
       },
       async execute(input = {}, runtime) {
         const agent = runtime.agents.spawn(input);
+        runtime.inbox.ensure(agent.id);
         await runtime.persist();
         return { ok: true, tool: 'spawn_agent', agent };
       },
@@ -228,8 +229,9 @@ export function createBuiltinTools() {
       async execute(input = {}, runtime) {
         const message = { from: input.from ?? 'runtime', to: input.to, body: input.body ?? '', sentAt: new Date().toISOString() };
         runtime.session.messages = [...(runtime.session.messages ?? []), message];
+        const routed = runtime.inbox.send(input.to, message);
         await runtime.persist();
-        return { ok: true, tool: 'send_message', message };
+        return { ok: true, tool: 'send_message', message: routed };
       },
     }),
 
@@ -249,9 +251,16 @@ export function createBuiltinTools() {
       async execute(input = {}, runtime) {
         let task;
         switch (input.action) {
-          case 'create': task = runtime.tasks.create(input.task ?? {}); break;
-          case 'update': task = runtime.tasks.update(input.id, input.patch ?? {}); break;
-          default: return { ok: true, tool: 'tasks', tasks: runtime.tasks.list() };
+          case 'create':
+            task = runtime.tasks.create(input.task ?? {});
+            break;
+          case 'update':
+            task = runtime.tasks.update(input.id, input.patch ?? {});
+            break;
+          case 'dispatch':
+            return { ok: true, tool: 'tasks', results: await runtime.orchestrator.runReadyTasks(), tasks: runtime.tasks.list() };
+          default:
+            return { ok: true, tool: 'tasks', tasks: runtime.tasks.list() };
         }
         await runtime.persist();
         return { ok: true, tool: 'tasks', task, tasks: runtime.tasks.list() };
