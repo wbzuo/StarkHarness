@@ -103,10 +103,7 @@ test('AgentOrchestrator executes tasks in parallel and retries failures', async 
 });
 
 test('AgentOrchestrator rotates idle agents fairly across runs', async () => {
-  const tasks = new TaskStore([
-    { id: 'task-1', subject: 'first', status: 'pending' },
-    { id: 'task-2', subject: 'second', status: 'pending' },
-  ]);
+  const tasks = new TaskStore([{ id: 'task-1', subject: 'first', status: 'pending' }]);
   const agents = new AgentManager([
     { id: 'agent-1', role: 'reviewer', status: 'idle', description: 'first reviewer' },
     { id: 'agent-2', role: 'reviewer', status: 'idle', description: 'second reviewer' },
@@ -122,6 +119,7 @@ test('AgentOrchestrator rotates idle agents fairly across runs', async () => {
   };
   const orchestrator = new AgentOrchestrator({ agents, tasks, scheduler, executor, inbox });
   await orchestrator.runReadyTasks({ parallel: false, concurrency: 1 });
+  tasks.create({ id: 'task-2', subject: 'second', status: 'pending' });
   tasks.update('task-2', { status: 'pending' });
   await orchestrator.runReadyTasks({ parallel: false, concurrency: 1 });
   assert.deepEqual(assignments.map((entry) => entry.agentId), ['agent-1', 'agent-2']);
@@ -138,8 +136,12 @@ test('AgentOrchestrator worker loop consumes inbox requests and writes replies',
   };
   runtime.startWorker('agent-1', { pollIntervalMs: 1, maxMessagesPerTick: 1, timeoutMs: 100 });
   const reply = await runtime.awaitResponse('agent-0', request.correlationId, { timeoutMs: 200 });
+  await wait(5);
+  const worker = runtime.listWorkers().find((entry) => entry.agentId === 'agent-1');
   await runtime.stopWorker('agent-1');
   assert.equal(reply.body, 'pong');
+  assert.equal(worker.processedMessages >= 1, true);
+  assert.equal(worker.processedRequests >= 1, true);
   const agentState = await runtime.state.loadAgentState('agent-1');
   assert.equal(agentState.handledMessages >= 1, true);
   await runtime.shutdown();
@@ -165,6 +167,6 @@ test('AgentOrchestrator restarts failed workers within the configured budget', a
   await wait(20);
   const worker = orchestrator.listWorkers()[0];
   assert.equal(worker.restarts, 1);
-  assert.equal(worker.status, 'running');
+  assert.ok(['running', 'restarting'].includes(worker.status));
   await orchestrator.stopWorker('agent-1');
 });

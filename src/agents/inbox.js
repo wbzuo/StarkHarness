@@ -147,6 +147,30 @@ export class AgentInbox {
     return this.list(agentId, { kind: 'response', correlationId })[0] ?? null;
   }
 
+  pendingCount() {
+    return this.#pending.size;
+  }
+
+  pendingKeys() {
+    return [...this.#pending.keys()];
+  }
+
+  stats() {
+    const agents = {};
+    for (const [agentId, messages] of this.#messages.entries()) {
+      agents[agentId] = {
+        queued: messages.length,
+        work: messages.filter((message) => message.kind !== 'response').length,
+        responses: messages.filter((message) => message.kind === 'response').length,
+      };
+    }
+    return {
+      totalQueued: this.totalCount(),
+      pendingResponses: this.pendingCount(),
+      agents,
+    };
+  }
+
   snapshot() {
     return {
       messages: Object.fromEntries([...this.#messages.entries()].map(([agentId, messages]) => [agentId, [...messages]])),

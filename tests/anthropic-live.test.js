@@ -6,6 +6,7 @@ import {
   parseContentBlocks,
   buildRequestBody,
   callMessagesAPI,
+  streamMessagesAPI,
 } from '../src/providers/anthropic-live.js';
 
 test('formatMessages converts context messages to Anthropic format', () => {
@@ -108,4 +109,47 @@ test('buildRequestBody assembles a valid API request', () => {
 
 test('callMessagesAPI throws without API key', async () => {
   await assert.rejects(() => callMessagesAPI({}), /ANTHROPIC_API_KEY is required/);
+});
+
+test('streamMessagesAPI emits text chunks from SSE responses', async () => {
+  const originalFetch = global.fetch;
+  const encoder = new TextEncoder();
+  global.fetch = async () => new Response(new ReadableStream({
+    start(controller) {
+      controller.enqueue(encoder.encode([
+        'event: message_start',
+        'data: {"type":"message_start","message":{"usage":{"input_tokens":11}}}',
+        '',
+        'event: content_block_delta',
+        'data: {"type":"content_block_delta","delta":{"type":"text_delta","text":"Hel"}}',
+        '',
+        'event: content_block_delta',
+        'data: {"type":"content_block_delta","delta":{"type":"text_delta","text":"lo"}}',
+        '',
+        'event: message_delta',
+        'data: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":2}}',
+        '',
+      ].join('\n')));
+      controller.close();
+    },
+  }), { status: 200 });
+
+  try {
+    const chunks = [];
+    const result = await streamMessagesAPI({
+      apiKey: 'test',
+      messages: [{ role: 'user', content: 'hi' }],
+      onTextChunk: async (chunk) => {
+        chunks.push(chunk);
+      },
+    });
+
+    assert.equal(result.streamed, true);
+    assert.equal(result.text, 'Hello');
+    assert.deepEqual(chunks, ['Hel', 'lo']);
+    assert.equal(result.usage.input_tokens, 11);
+    assert.equal(result.usage.output_tokens, 2);
+  } finally {
+    global.fetch = originalFetch;
+  }
 });

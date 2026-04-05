@@ -15,6 +15,8 @@ test('buildDiagnostics returns complete registry snapshot', () => {
       listEvents: () => ['PreToolUse'],
       listHandlers: () => [{ event: 'PreToolUse', matcher: '*' }],
     },
+    listWorkers: () => [{ agentId: 'agent-1', status: 'running' }],
+    inbox: { stats: () => ({ totalQueued: 2, pendingResponses: 1, agents: { 'agent-1': { queued: 2 } } }) },
     skills: { listDiscovered: () => [{ name: 'review', description: 'code review' }] },
     permissions: { snapshot: () => ({ read: 'allow', write: 'ask' }) },
     pluginDiagnostics: { commandConflicts: [], toolConflicts: [] },
@@ -29,6 +31,8 @@ test('buildDiagnostics returns complete registry snapshot', () => {
   assert.equal(diag.plugins.length, 1);
   assert.equal(diag.hooks.events.length, 1);
   assert.equal(diag.hooks.handlers.length, 1);
+  assert.equal(diag.workers.length, 1);
+  assert.equal(diag.mailbox.pendingResponses, 1);
   assert.equal(diag.skills.length, 1);
   assert.equal(diag.policy.read, 'allow');
   assert.equal(diag.conflicts.commands.length, 0);
@@ -41,6 +45,8 @@ test('buildDiagnostics handles missing optional registries gracefully', () => {
     providers: { list: () => [] },
     plugins: { list: () => [], listCapabilities: () => [] },
     hooks: { listEvents: () => [] },
+    listWorkers: () => [],
+    inbox: { stats: () => ({ totalQueued: 0, pendingResponses: 0, agents: {} }) },
     permissions: { snapshot: () => ({}) },
     pluginDiagnostics: { commandConflicts: [], toolConflicts: [] },
     session: { id: 'sh-min' },
@@ -49,5 +55,6 @@ test('buildDiagnostics handles missing optional registries gracefully', () => {
   const diag = buildDiagnostics(minRuntime);
   assert.equal(diag.tools.length, 0);
   assert.equal(diag.skills.length, 0);
+  assert.equal(diag.mailbox.totalQueued, 0);
   assert.deepEqual(diag.hooks.handlers, []);
 });

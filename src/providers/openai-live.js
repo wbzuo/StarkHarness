@@ -5,6 +5,72 @@
 const DEFAULT_MODEL = 'deepseek-chat';
 const DEFAULT_MAX_TOKENS = 4096;
 
+function ensureStreamToolCall(toolCalls, index) {
+  if (!toolCalls[index]) {
+    toolCalls[index] = {
+      id: `tool-${index}`,
+      name: 'unknown',
+      arguments: '',
+    };
+  }
+  return toolCalls[index];
+}
+
+function finalizeStreamToolCalls(toolCalls) {
+  return toolCalls
+    .filter(Boolean)
+    .map((toolCall) => ({
+      id: toolCall.id,
+      name: toolCall.name,
+      input: (() => {
+        try {
+          return JSON.parse(toolCall.arguments || '{}');
+        } catch {
+          return {};
+        }
+      })(),
+    }));
+}
+
+async function consumeSseResponse(response, onEvent) {
+  if (!response.body) return;
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+
+  while (true) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const frames = buffer.split('\n\n');
+    buffer = frames.pop() ?? '';
+    for (const frame of frames) {
+      const dataLines = frame
+        .split('\n')
+        .filter((line) => line.startsWith('data:'))
+        .map((line) => line.slice(5).trim())
+        .filter(Boolean);
+      for (const dataLine of dataLines) {
+        if (dataLine === '[DONE]') continue;
+        await onEvent(JSON.parse(dataLine));
+      }
+    }
+  }
+
+  const tail = buffer.trim();
+  if (tail) {
+    const dataLines = tail
+      .split('\n')
+      .filter((line) => line.startsWith('data:'))
+      .map((line) => line.slice(5).trim())
+      .filter(Boolean);
+    for (const dataLine of dataLines) {
+      if (dataLine === '[DONE]') continue;
+      await onEvent(JSON.parse(dataLine));
+    }
+  }
+}
+
 // Anthropic tool schema → OpenAI function tool
 export function formatToolsOpenAI(schemas = []) {
   return schemas.map(({ name, description, input_schema }) => ({
@@ -122,4 +188,83 @@ export async function callChatCompletionsAPI({
 
   const data = await response.json();
   return parseOpenAIResponse(data);
+}
+
+export async function streamChatCompletionsAPI({
+  apiKey,
+  baseUrl,
+  model = DEFAULT_MODEL,
+  systemPrompt = '',
+  messages = [],
+  tools = [],
+  maxTokens = DEFAULT_MAX_TOKENS,
+  onTextChunk,
+} = {}) {
+  if (!apiKey) throw new Error('API key is required for compatible provider');
+
+  const url = `${baseUrl.replace(/\/$/, '')}/v1/chat/completions`;
+  const openAIMessages = [];
+  if (systemPrompt) openAIMessages.push({ role: 'system', content: systemPrompt });
+  openAIMessages.push(...convertMessagesToOpenAI(messages));
+
+  const body = {
+    model,
+    max_tokens: maxTokens,
+    messages: openAIMessages,
+    stream: true,
+    stream_options: { include_usage: true },
+  };
+  if (tools.length > 0) body.tools = tools;
+
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify(body),
+  });
+
+  if (!response.ok) {
+    const errorBody = await response.text().catch(() => '');
+    throw new Error(`OpenAI-compatible API error ${response.status}: ${errorBody}`);
+  }
+
+  const result = {
+    text: '',
+    toolCalls: [],
+    stopReason: 'end_turn',
+    usage: {},
+    raw: [],
+    streamed: true,
+  };
+
+  await consumeSseResponse(response, async (payload) => {
+    result.raw.push(payload);
+    const choice = payload.choices?.[0];
+    const delta = choice?.delta ?? {};
+    if (delta.content) {
+      result.text += delta.content;
+      if (typeof onTextChunk === 'function') await onTextChunk(delta.content);
+    }
+    for (const toolDelta of delta.tool_calls ?? []) {
+      const toolCall = ensureStreamToolCall(result.toolCalls, toolDelta.index ?? 0);
+      if (toolDelta.id) toolCall.id = toolDelta.id;
+      if (toolDelta.function?.name) toolCall.name = toolDelta.function.name;
+      if (toolDelta.function?.arguments) toolCall.arguments += toolDelta.function.arguments;
+    }
+    if (choice?.finish_reason === 'tool_calls') result.stopReason = 'tool_use';
+    else if (choice?.finish_reason) result.stopReason = choice.finish_reason;
+    if (payload.usage) {
+      result.usage = {
+        input_tokens: payload.usage.prompt_tokens ?? result.usage.input_tokens ?? 0,
+        output_tokens: payload.usage.completion_tokens ?? result.usage.output_tokens ?? 0,
+      };
+    }
+  });
+
+  return {
+    ...result,
+    toolCalls: finalizeStreamToolCalls(result.toolCalls),
+  };
 }

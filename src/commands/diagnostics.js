@@ -10,6 +10,8 @@ export function buildDiagnostics(runtime) {
       events: runtime.hooks.listEvents(),
       handlers: runtime.hooks.listHandlers?.() ?? [],
     },
+    workers: runtime.listWorkers?.() ?? [],
+    mailbox: runtime.inbox?.stats?.() ?? { totalQueued: 0, pendingResponses: 0, agents: {} },
     skills: runtime.skills?.listDiscovered?.() ?? [],
     policy: runtime.permissions.snapshot(),
     conflicts: {

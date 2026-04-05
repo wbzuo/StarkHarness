@@ -37,7 +37,13 @@ export class AgentOrchestrator {
   }
 
   #orderedIdleAgents() {
-    const idle = this.agents.listByStatus('idle');
+    const idle = this.agents
+      .listByStatus('idle')
+      .sort((left, right) => {
+        const backlog = this.inbox.count(left.id) - this.inbox.count(right.id);
+        if (backlog !== 0) return backlog;
+        return left.id.localeCompare(right.id);
+      });
     if (idle.length <= 1) return idle;
     const start = this.#cursor % idle.length;
     return [...idle.slice(start), ...idle.slice(0, start)];
@@ -146,12 +152,17 @@ export class AgentOrchestrator {
       while (!worker.controller.signal.aborted) {
         const messages = this.inbox.consumeWork(agentId, worker.maxMessagesPerTick);
         if (messages.length === 0) {
+          worker.lastHeartbeatAt = new Date().toISOString();
           await delay(worker.pollIntervalMs, undefined, { ref: false });
           continue;
         }
         for (const message of messages) {
           if (worker.controller.signal.aborted) break;
           await this.processInboxMessage(agentId, message, { signal: worker.controller.signal, timeoutMs: worker.timeoutMs });
+          worker.processedMessages += 1;
+          if (message.kind === 'request') worker.processedRequests += 1;
+          if (message.kind === 'response') worker.processedResponses += 1;
+          worker.lastHeartbeatAt = new Date().toISOString();
         }
       }
     };
@@ -176,6 +187,13 @@ export class AgentOrchestrator {
       restarts: 0,
       status: 'starting',
       lastError: null,
+      failures: 0,
+      processedMessages: 0,
+      processedRequests: 0,
+      processedResponses: 0,
+      lastStartedAt: null,
+      lastStoppedAt: null,
+      lastHeartbeatAt: null,
       promise: null,
     };
 
@@ -183,17 +201,22 @@ export class AgentOrchestrator {
       while (!worker.controller.signal.aborted) {
         try {
           worker.status = worker.restarts > 0 ? 'restarting' : 'running';
+          worker.lastStartedAt = new Date().toISOString();
           await this.#createWorkerLoop(agentId, worker)();
           worker.status = 'stopped';
+          worker.lastStoppedAt = new Date().toISOString();
           return;
         } catch (error) {
           worker.lastError = error instanceof Error ? error.message : String(error);
+          worker.failures += 1;
           if (worker.controller.signal.aborted) {
             worker.status = 'stopped';
+            worker.lastStoppedAt = new Date().toISOString();
             return;
           }
           if (worker.restarts >= worker.maxRestarts) {
             worker.status = 'failed';
+            worker.lastStoppedAt = new Date().toISOString();
             throw error;
           }
           worker.restarts += 1;
@@ -229,6 +252,13 @@ export class AgentOrchestrator {
       restarts,
       status,
       lastError,
+      failures,
+      processedMessages,
+      processedRequests,
+      processedResponses,
+      lastStartedAt,
+      lastStoppedAt,
+      lastHeartbeatAt,
     }) => ({
       agentId,
       pollIntervalMs,
@@ -239,6 +269,13 @@ export class AgentOrchestrator {
       restarts,
       status,
       lastError,
+      failures,
+      processedMessages,
+      processedRequests,
+      processedResponses,
+      lastStartedAt,
+      lastStoppedAt,
+      lastHeartbeatAt,
     }));
   }
 

@@ -40,7 +40,9 @@ export class AgentRunner {
 
       totalUsage.input_tokens += response.usage?.input_tokens ?? 0;
       totalUsage.output_tokens += response.usage?.output_tokens ?? 0;
-      await emitTextChunks(onTextChunk, response.text);
+      if (response.streamed !== true) {
+        await emitTextChunks(onTextChunk, response.text);
+      }
 
       // Build assistant message content
       const assistantContent = [];

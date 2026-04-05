@@ -67,6 +67,31 @@ test('AgentRunner streams final text through onTextChunk callback', async () => 
   assert.deepEqual(chunks, ['Hello', ' ', 'there']);
 });
 
+test('AgentRunner does not double-emit text when provider streams natively', async () => {
+  const hooks = new HookDispatcher();
+  const tools = new ToolRegistry();
+  const permissions = new PermissionEngine({ read: 'allow' });
+  const chunks = [];
+  const provider = {
+    async complete({ onTextChunk }) {
+      await onTextChunk('Hello');
+      return { text: 'Hello', toolCalls: [], stopReason: 'end_turn', usage: {}, streamed: true };
+    },
+  };
+
+  const runner = new AgentRunner({ provider, hooks, tools, permissions });
+  const result = await runner.run({
+    userMessage: 'Hi',
+    systemPrompt: 'You are helpful.',
+    onTextChunk: async (chunk) => {
+      chunks.push(chunk);
+    },
+  });
+
+  assert.equal(result.finalText, 'Hello');
+  assert.deepEqual(chunks, ['Hello']);
+});
+
 test('AgentRunner executes tool call and loops back', async () => {
   const provider = makeMockProvider([
     {

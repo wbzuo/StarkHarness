@@ -1,5 +1,5 @@
 import { createStubProvider } from './base.js';
-import { callMessagesAPI, formatTools, formatMessages } from './anthropic-live.js';
+import { callMessagesAPI, streamMessagesAPI, formatTools, formatMessages } from './anthropic-live.js';
 
 const DEFAULT_MODEL = 'claude-sonnet-4-20250514';
 
@@ -24,11 +24,11 @@ export function createAnthropicProvider(config = {}) {
     modelFamily: 'claude',
     capabilities: ['chat', 'tools', 'vision'],
     priority: 1,
-    async complete({ systemPrompt, messages, tools, prompt, ...rest }) {
+    async complete({ systemPrompt, messages, tools, prompt, onTextChunk, ...rest }) {
       // Support both old (prompt-based) and new (messages-based) calling conventions
       const effectiveMessages = messages ?? (prompt ? [{ role: 'user', content: prompt }] : []);
       const formattedTools = tools ? formatTools(tools) : [];
-      const result = await callMessagesAPI({
+      const request = {
         apiKey,
         baseUrl: config.baseUrl,
         model: config.model ?? DEFAULT_MODEL,
@@ -36,7 +36,10 @@ export function createAnthropicProvider(config = {}) {
         messages: formatMessages(effectiveMessages),
         tools: formattedTools,
         maxTokens: config.maxTokens ?? 8192,
-      });
+      };
+      const result = typeof onTextChunk === 'function'
+        ? await streamMessagesAPI({ ...request, onTextChunk })
+        : await callMessagesAPI(request);
       return result;
     },
   };
