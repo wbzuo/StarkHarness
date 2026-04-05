@@ -1,8 +1,10 @@
 // maxTurns limits total tool executions, not API round-trips.
 // A single response with N tool_use blocks counts as N turns.
 import { tokenizeForStreaming } from '../utils/text.js';
+import { compactMessages } from './context.js';
 
 const DEFAULT_MAX_TURNS = 25;
+const DEFAULT_COMPACT_THRESHOLD = 60000;
 
 async function emitTextChunks(onTextChunk, text) {
   if (typeof onTextChunk !== 'function' || !text) return;
@@ -20,16 +22,27 @@ export class AgentRunner {
     this.maxTurns = maxTurns;
   }
 
-  async run({ userMessage, systemPrompt, toolSchemas, onTextChunk }) {
-    const messages = [{ role: 'user', content: userMessage }];
+  async run({ userMessage, systemPrompt, toolSchemas, onTextChunk, compactThreshold = DEFAULT_COMPACT_THRESHOLD }) {
+    let messages = [{ role: 'user', content: userMessage }];
     const schemas = toolSchemas ?? this.tools.toSchemaList();
     const turns = [];
     let finalText = '';
     let stopReason = 'end_turn';
     let totalUsage = { input_tokens: 0, output_tokens: 0 };
+    let compactions = 0;
     const maxApiCalls = Math.max(1, this.maxTurns + 1);
 
     for (let i = 0; i < maxApiCalls; i++) {
+      // Auto-compact when messages grow beyond threshold
+      if (compactThreshold > 0 && messages.length > 4) {
+        const result = compactMessages(messages, { maxTokens: compactThreshold });
+        if (result.compacted) {
+          await this.hooks.fire('PreCompact', { messageCount: messages.length, removed: result.removed, estimatedTokens: result.estimatedTokens });
+          messages = result.messages;
+          compactions++;
+        }
+      }
+
       const response = await this.provider.complete({
         systemPrompt,
         messages,
@@ -92,7 +105,7 @@ export class AgentRunner {
     // Fire Stop hook — deny means a hook wants to prevent stopping
     const stopResult = await this.hooks.fire('Stop', { reason: stopReason, turns: turns.length });
 
-    return { finalText, turns, messages, stopReason, stopHook: stopResult.decision, usage: totalUsage };
+    return { finalText, turns, messages, stopReason, stopHook: stopResult.decision, usage: totalUsage, compactions };
   }
 
   async #executeTool(toolCall) {

@@ -22,7 +22,7 @@ import { createCommandRegistry, CommandRegistry } from '../commands/registry.js'
 import { createWorkspaceBlueprint } from '../workspace/index.js';
 import { createBridgeBlueprint } from '../bridge/index.js';
 import { createReplBlueprint } from '../ui/repl.js';
-import { createTelemetrySink } from '../telemetry/index.js';
+import { createTelemetrySink, TraceContext } from '../telemetry/index.js';
 import { StateStore } from '../state/store.js';
 import { loadPolicyFile, mergePolicy } from '../permissions/policy.js';
 import { getSandboxProfile } from '../permissions/profiles.js';
@@ -212,8 +212,13 @@ export async function createRuntime(options = {}) {
       await this.state.saveSession(this.session);
       await this.state.saveRuntimeSnapshot(createSnapshot(this));
     },
+    trace: null,
+    startTrace() {
+      this.trace = new TraceContext();
+      return this.trace;
+    },
     async log(eventName, payload) {
-      return this.telemetry.emit(eventName, payload);
+      return this.telemetry.emit(eventName, payload, this.trace);
     },
     async dispatchTurn(turn) {
       await this.log('turn:start', turn);
@@ -232,6 +237,8 @@ export async function createRuntime(options = {}) {
       return result;
     },
     async run(userMessage, options = {}) {
+      const trace = this.startTrace();
+      const runSpan = trace.startSpan('run', { userMessage: userMessage.slice(0, 100) });
       await this.log('run:start', { userMessage });
       const discovered = this.skills.listDiscovered();
       const skillMap = new Map(discovered.map((skill) => [skill.dir, skill]));
@@ -264,13 +271,18 @@ export async function createRuntime(options = {}) {
         });
       }
       await this.persist();
+      runSpan.addEvent('complete', { turns: result.turns.length, stopReason: result.stopReason, compactions: result.compactions ?? 0 });
+      trace.endSpan(runSpan.spanId);
+      await this.telemetry.emitSpan(runSpan);
       await this.log('run:complete', {
         turns: result.turns.length,
         stopReason: result.stopReason,
         usage: result.usage,
         skill: binding?.name ?? null,
+        traceId: trace.traceId,
+        compactions: result.compactions ?? 0,
       });
-      return { ...result, activeSkill: binding?.name ?? null };
+      return { ...result, activeSkill: binding?.name ?? null, traceId: trace.traceId };
     },
     async startWorker(agentId, options = {}) {
       return this.orchestrator.startWorker(agentId, options);

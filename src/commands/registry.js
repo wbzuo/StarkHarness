@@ -231,6 +231,29 @@ export function createCommandRegistry() {
       },
     },
     {
+      name: 'traces',
+      description: 'Query trace spans — filter by traceId, agentId, name, since',
+      async execute(runtime, args = {}) {
+        const spans = await runtime.telemetry.queryTraces({
+          traceId: args.traceId,
+          agentId: args.agentId,
+          name: args.name,
+          since: args.since,
+        });
+        if (args.tree === 'true' && args.traceId) {
+          const { TraceContext } = await import('../telemetry/index.js');
+          const trace = new TraceContext(args.traceId);
+          for (const span of spans) {
+            const s = trace.startSpan(span.name, span.attributes);
+            s.parentSpanId = span.parentSpanId;
+            if (span.endTime) s.end(span.status);
+          }
+          return trace.toTree();
+        }
+        return spans;
+      },
+    },
+    {
       name: 'transcript',
       description: 'Replay the harness event log',
       async execute(runtime, args = {}) {
