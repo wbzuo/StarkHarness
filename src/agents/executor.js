@@ -1,11 +1,8 @@
-import { spawn } from 'node:child_process';
-import { fileURLToPath } from 'node:url';
 import { ToolRegistry } from '../tools/registry.js';
 import { AgentRunner } from '../kernel/runner.js';
 import { createContextEnvelope } from '../kernel/context.js';
 import { createBuiltinTools } from '../tools/builtins/index.js';
-
-const childRuntimePath = fileURLToPath(new URL('./child-runtime.js', import.meta.url));
+import { createExecutionProvider } from '../runtime/sandbox.js';
 
 function buildToolRegistry(runtime, agent) {
   const registry = new ToolRegistry();
@@ -26,16 +23,19 @@ function createAgentSession(agent, execution, result) {
   };
 }
 
-function canUseProcessIsolation(agent, runtime, tools) {
-  if (agent.isolation !== 'process') return false;
-  if ((runtime.hooks.listHandlers?.() ?? []).length > 0) return false;
+function resolveIsolationMode(agent, runtime, tools) {
+  const mode = agent.isolation ?? 'local';
+  if (mode === 'local') return 'local';
+  // Process/docker isolation requires portable tools (no delegate tools, no custom hooks)
+  if ((runtime.hooks.listHandlers?.() ?? []).length > 0) return 'local';
   const portableToolNames = new Set([
     ...createBuiltinTools()
       .filter((tool) => tool.capability !== 'delegate')
       .map((tool) => tool.name),
     ...runtime.plugins.listTools().map((tool) => tool.name),
   ]);
-  return tools.list().every((tool) => portableToolNames.has(tool.name) && tool.capability !== 'delegate');
+  const allPortable = tools.list().every((tool) => portableToolNames.has(tool.name) && tool.capability !== 'delegate');
+  return allPortable ? mode : 'local';
 }
 
 export class AgentExecutor {
@@ -56,65 +56,20 @@ export class AgentExecutor {
     };
   }
 
-  async #runInChildProcess(agent, execution, payload, options = {}) {
-    return new Promise((resolve, reject) => {
-      const child = spawn(process.execPath, [childRuntimePath], {
-        cwd: this.runtime.context.cwd,
-        stdio: ['ignore', 'ignore', 'pipe', 'ipc'],
-      });
-      let stderrBuffer = '';
-      let settled = false;
-
-      const settleError = (error) => {
-        if (settled) return;
-        settled = true;
-        reject(error);
-      };
-
-      const handleMessage = async (event) => {
-        if (event.type === 'chunk') {
-          await options.onTextChunk?.(event.chunk);
-          return;
-        }
-        if (event.type === 'result') {
-          if (settled) return;
-          settled = true;
-          resolve(event.result);
-          return;
-        }
-        if (event.type === 'error') {
-          const error = new Error(event.error?.message ?? 'child-execution-failed');
-          error.name = event.error?.name ?? 'Error';
-          settleError(error);
-        }
-      };
-
-      child.on('message', (event) => {
-        void handleMessage(event).catch(settleError);
-      });
-      child.stderr.on('data', (chunk) => {
-        stderrBuffer += chunk.toString();
-      });
-      child.on('error', settleError);
-      child.on('close', (code) => {
-        if (!settled) {
-          const error = new Error(stderrBuffer || `child-exit:${code}`);
-          error.name = 'ChildProcessError';
-          settleError(error);
-        }
-      });
-      child.send({
-        cwd: this.runtime.context.cwd,
-        providerConfig: this.runtime.providers.config,
-        permissions: this.runtime.permissions.snapshot(),
-        plugins: this.runtime.plugins.snapshot(),
-        allowedToolNames: payload.allowedToolNames,
-        agent,
-        execution,
-        userMessage: payload.userMessage,
-        systemPrompt: payload.systemPrompt,
-      });
-    });
+  async #runIsolated(agent, execution, payload, options = {}) {
+    const mode = resolveIsolationMode(agent, this.runtime, buildToolRegistry(this.runtime, agent));
+    const provider = createExecutionProvider(mode);
+    return provider.execute({
+      cwd: this.runtime.context.cwd,
+      providerConfig: this.runtime.providers.config,
+      permissions: this.runtime.permissions.snapshot(),
+      plugins: this.runtime.plugins.snapshot(),
+      allowedToolNames: payload.allowedToolNames,
+      agent,
+      execution,
+      userMessage: payload.userMessage,
+      systemPrompt: payload.systemPrompt,
+    }, { onTextChunk: options.onTextChunk });
   }
 
   async #persistAgent(agent, execution, result) {
@@ -141,8 +96,9 @@ export class AgentExecutor {
     });
     isolatedContext.systemPrompt = systemPrompt;
 
-    if (canUseProcessIsolation(agent, this.runtime, tools)) {
-      const result = await this.#runInChildProcess(agent, execution, {
+    const isolationMode = resolveIsolationMode(agent, this.runtime, tools);
+    if (isolationMode !== 'local') {
+      const result = await this.#runIsolated(agent, execution, {
         allowedToolNames: tools.list().map((tool) => tool.name),
         userMessage,
         systemPrompt: isolatedContext.systemPrompt,
@@ -156,7 +112,7 @@ export class AgentExecutor {
         turns: result.turns,
         stopReason: result.stopReason,
         usage: result.usage,
-        isolation: 'process',
+        isolation: isolationMode,
       };
     }
 
