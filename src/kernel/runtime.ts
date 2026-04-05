@@ -88,6 +88,13 @@ export async function createRuntime(options = {}) {
   for (const provider of createProviderBlueprint(providerConfig)) {
     providers.register(provider);
   }
+  function reloadProviders(nextConfig = providers.config) {
+    providers.config = nextConfig;
+    providers.clear();
+    for (const provider of createProviderBlueprint(nextConfig)) {
+      providers.register(provider);
+    }
+  }
   for (const tool of createBuiltinTools()) {
     tools.register(tool);
   }
@@ -260,6 +267,22 @@ export async function createRuntime(options = {}) {
       const event = await this.telemetry.emit(eventName, payload, this.trace);
       await this.observability.report(eventName, payload);
       return event;
+    },
+    async reloadEnvAndProviders() {
+      const { loadRuntimeEnv } = await import('../config/env.js');
+      const nextEnv = await loadRuntimeEnv({
+        cwd: this.app?.rootDir ?? this.context.cwd,
+        envFilePath: this.app?.paths?.envPath ?? null,
+      });
+      this.env = nextEnv;
+      reloadProviders(mergeProviderConfig(
+        mergeProviderConfig(loadedProviderConfig, nextEnv.providers),
+        options.providerConfig ?? {},
+      ));
+      this.webAccess = await describeWebAccess({ cwd: this.context.cwd, env: nextEnv.raw });
+      this.observability = createObservabilityManager(nextEnv.telemetry);
+      this.featureFlags = createFeatureFlagManager(nextEnv.telemetry);
+      return nextEnv;
     },
     async dispatchTurn(turn, options = {}) {
       await this.log('turn:start', turn);

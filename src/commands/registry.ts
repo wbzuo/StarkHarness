@@ -4,6 +4,7 @@ import { listSandboxProfiles } from '../permissions/profiles.js';
 import { createReplayPlan, evaluateReplayPlan } from '../replay/runner.js';
 import { getWebAccessStatus } from '../web-access/index.js';
 import { listStarterApps, scaffoldApp } from '../app/scaffold.js';
+import { writeEnvValues, removeEnvKeys } from '../config/env.js';
 
 function filterTranscript(entries, args = {}) {
   let next = entries;
@@ -145,6 +146,76 @@ export function createCommandRegistry() {
             model: runtime.env.providers.compatible.model ?? null,
           },
         } : null;
+      },
+    },
+    {
+      name: 'login',
+      description: 'Persist provider credentials/config into the app or workspace env file and reload runtime providers',
+      async execute(runtime, args = {}) {
+        const provider = args.provider ?? 'openai';
+        const keyMap = {
+          anthropic: {
+            apiKey: 'ANTHROPIC_API_KEY',
+            baseUrl: 'ANTHROPIC_BASE_URL',
+            model: 'ANTHROPIC_MODEL',
+          },
+          openai: {
+            apiKey: 'OPENAI_API_KEY',
+            baseUrl: 'OPENAI_BASE_URL',
+            model: 'OPENAI_MODEL',
+          },
+          compatible: {
+            apiKey: 'COMPATIBLE_API_KEY',
+            baseUrl: 'COMPATIBLE_BASE_URL',
+            model: 'COMPATIBLE_MODEL',
+          },
+        }[provider];
+        if (!keyMap) {
+          throw new Error(`Unsupported provider for login: ${provider}`);
+        }
+        const filePath = await writeEnvValues({
+          cwd: runtime.app?.rootDir ?? runtime.context.cwd,
+          envFilePath: runtime.app?.paths?.envPath ?? null,
+          values: {
+            ...(args.apiKey ? { [keyMap.apiKey]: args.apiKey } : {}),
+            ...(args.baseUrl ? { [keyMap.baseUrl]: args.baseUrl } : {}),
+            ...(args.model ? { [keyMap.model]: args.model } : {}),
+          },
+        });
+        await runtime.reloadEnvAndProviders();
+        return {
+          ok: true,
+          provider,
+          filePath,
+          status: await runtime.dispatchCommand('login-status'),
+        };
+      },
+    },
+    {
+      name: 'logout',
+      description: 'Remove provider credentials/config from the app or workspace env file and reload runtime providers',
+      async execute(runtime, args = {}) {
+        const provider = args.provider ?? 'openai';
+        const keyMap = {
+          anthropic: ['ANTHROPIC_API_KEY', 'ANTHROPIC_BASE_URL', 'ANTHROPIC_MODEL'],
+          openai: ['OPENAI_API_KEY', 'OPENAI_BASE_URL', 'OPENAI_MODEL'],
+          compatible: ['COMPATIBLE_API_KEY', 'COMPATIBLE_BASE_URL', 'COMPATIBLE_MODEL'],
+        }[provider];
+        if (!keyMap) {
+          throw new Error(`Unsupported provider for logout: ${provider}`);
+        }
+        const filePath = await removeEnvKeys({
+          cwd: runtime.app?.rootDir ?? runtime.context.cwd,
+          envFilePath: runtime.app?.paths?.envPath ?? null,
+          keys: keyMap,
+        });
+        await runtime.reloadEnvAndProviders();
+        return {
+          ok: true,
+          provider,
+          filePath,
+          status: await runtime.dispatchCommand('login-status'),
+        };
       },
     },
     {

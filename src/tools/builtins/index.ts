@@ -4,6 +4,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { defineTool } from '../types.js';
 import { ensureWebAccessReady, callWebAccessProxy, loadSiteContext } from '../../web-access/index.js';
+import { webSearch } from '../../search/web.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -219,6 +220,28 @@ export function createBuiltinTools() {
         const files = await walkFiles(runtime.context.cwd);
         const matches = files.filter((filePath) => matchesGlob(filePath, pattern, runtime.context.cwd));
         return { ok: true, tool: 'glob', pattern, matches };
+      },
+    }),
+
+    defineTool({
+      name: 'web_search',
+      capability: 'network',
+      description: 'Search the web using the configured search provider.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          query: { type: 'string', description: 'Search query' },
+          count: { type: 'number', description: 'Number of results to return' },
+        },
+        required: ['query'],
+      },
+      async execute(input = {}, runtime) {
+        const result = await webSearch({
+          query: input.query,
+          count: input.count,
+          envConfig: runtime.env,
+        });
+        return { ok: true, tool: 'web_search', ...result };
       },
     }),
 
