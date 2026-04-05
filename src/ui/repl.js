@@ -42,17 +42,17 @@ export async function startRepl(runtime) {
         } else {
           output.write('…thinking\n');
           result = await runtime.run(line, {
-            onTextChunk: async (chunk) => {
+            onTextChunk(chunk) {
               streamed = true;
               output.write(chunk);
             },
           });
-          if (streamed) output.write('\n');
         }
         transcript.push({ line, result });
-        if (typeof result?.finalText === 'string' && result.finalText && !streamed) {
-          await streamText(output, result.finalText);
-        } else if (typeof result?.finalText !== 'string' || !result.finalText) {
+        if (typeof result?.finalText === 'string' && result.finalText) {
+          if (streamed) output.write('\n');
+          else await streamText(output, result.finalText);
+        } else {
           output.write(`${formatResult(result)}\n`);
         }
       } catch (error) {
