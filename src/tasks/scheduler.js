@@ -11,9 +11,16 @@ export class TaskScheduler {
   listReady() {
     const all = this.tasks.list();
     const done = new Set(all.filter((task) => task.status === 'completed').map((task) => task.id));
+    const retryableStatuses = new Set(['pending', 'retryable']);
     return all
-      .filter((task) => (task.status ?? 'pending') === 'pending')
+      .filter((task) => retryableStatuses.has(task.status ?? 'pending'))
       .filter((task) => (task.dependsOn ?? []).every((dep) => done.has(dep)))
+      .filter((task) => {
+        if ((task.status ?? 'pending') !== 'retryable') return true;
+        const maxRetries = Number(task.maxRetries ?? 0);
+        const attempts = Number(task.attempts ?? 0);
+        return attempts < maxRetries;
+      })
       .sort((a, b) => priorityOf(b) - priorityOf(a));
   }
 
@@ -33,6 +40,17 @@ export class TaskScheduler {
       owner: agent.id,
       status: 'assigned',
       assignedAt: new Date().toISOString(),
+      attempts: Number(task.attempts ?? 0) + 1,
+    });
+  }
+
+  markRetryable(taskId, error) {
+    const task = this.tasks.get(taskId);
+    return this.tasks.update(taskId, {
+      status: 'retryable',
+      error,
+      lastFailedAt: new Date().toISOString(),
+      attempts: Number(task?.attempts ?? 0),
     });
   }
 }

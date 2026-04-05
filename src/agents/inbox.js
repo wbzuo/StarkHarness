@@ -21,6 +21,7 @@ export class AgentInbox {
       body: message.body ?? '',
       sentAt: message.sentAt ?? new Date().toISOString(),
       status: message.status ?? 'queued',
+      attempts: message.attempts ?? 0,
     };
     inbox.push(envelope);
     return envelope;
@@ -33,6 +34,21 @@ export class AgentInbox {
   pop(agentId) {
     const inbox = this.ensure(agentId);
     return inbox.shift() ?? null;
+  }
+
+  peek(agentId) {
+    const inbox = this.ensure(agentId);
+    return inbox[0] ?? null;
+  }
+
+  consume(agentId, limit = Infinity) {
+    const inbox = this.ensure(agentId);
+    const items = inbox.splice(0, limit);
+    return items;
+  }
+
+  count(agentId) {
+    return this.ensure(agentId).length;
   }
 
   snapshot() {
