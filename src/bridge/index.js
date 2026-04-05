@@ -3,6 +3,8 @@ export function createBridgeBlueprint() {
     ide: 'planned',
     remote: 'planned',
     mobile: 'planned',
-    web: 'planned',
+    web: 'ready',
   };
 }
+
+export { createHttpBridge } from './http.js';

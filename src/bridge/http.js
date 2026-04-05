@@ -1,0 +1,279 @@
+// Zero-dependency HTTP + WebSocket bridge for StarkHarness runtime.
+// Exposes the runtime as a JSON API + real-time streaming via WebSocket.
+//
+// Usage:
+//   const server = await createHttpBridge(runtime, { port: 3000 });
+//   // server.close() to shut down
+
+import { createServer } from 'node:http';
+import { randomBytes } from 'node:crypto';
+
+function parseBody(req) {
+  return new Promise((resolve, reject) => {
+    let body = '';
+    req.on('data', (chunk) => { body += chunk; });
+    req.on('end', () => {
+      try { resolve(body ? JSON.parse(body) : {}); }
+      catch { reject(new Error('Invalid JSON body')); }
+    });
+    req.on('error', reject);
+  });
+}
+
+function json(res, data, status = 200) {
+  const payload = JSON.stringify(data);
+  res.writeHead(status, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
+  res.end(payload);
+}
+
+function cors(res) {
+  res.writeHead(204, {
+    'Access-Control-Allow-Origin': '*',
+    'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+    'Access-Control-Allow-Headers': 'Content-Type',
+  });
+  res.end();
+}
+
+// Minimal WebSocket upgrade (RFC 6455) — no dependencies
+function acceptWebSocket(req, socket, head) {
+  const key = req.headers['sec-websocket-key'];
+  if (!key) { socket.destroy(); return null; }
+  const hash = require('node:crypto').createHash('sha1')
+    .update(key + '258EAFA5-E914-47DA-95CA-5AB5DC85B11C')
+    .digest('base64');
+  socket.write([
+    'HTTP/1.1 101 Switching Protocols',
+    'Upgrade: websocket',
+    'Connection: Upgrade',
+    `Sec-WebSocket-Accept: ${hash}`,
+    '', '',
+  ].join('\r\n'));
+  return socket;
+}
+
+function decodeWsFrame(buffer) {
+  if (buffer.length < 2) return null;
+  const opcode = buffer[0] & 0x0f;
+  const masked = (buffer[1] & 0x80) !== 0;
+  let payloadLen = buffer[1] & 0x7f;
+  let offset = 2;
+  if (payloadLen === 126) {
+    payloadLen = buffer.readUInt16BE(2);
+    offset = 4;
+  } else if (payloadLen === 127) {
+    payloadLen = Number(buffer.readBigUInt64BE(2));
+    offset = 10;
+  }
+  let mask = null;
+  if (masked) {
+    mask = buffer.slice(offset, offset + 4);
+    offset += 4;
+  }
+  if (buffer.length < offset + payloadLen) return null;
+  const data = buffer.slice(offset, offset + payloadLen);
+  if (mask) {
+    for (let i = 0; i < data.length; i++) data[i] ^= mask[i % 4];
+  }
+  return { opcode, data, totalLength: offset + payloadLen };
+}
+
+function encodeWsFrame(data) {
+  const payload = Buffer.from(data, 'utf8');
+  const header = [0x81]; // text frame, FIN
+  if (payload.length < 126) {
+    header.push(payload.length);
+  } else if (payload.length < 65536) {
+    header.push(126, (payload.length >> 8) & 0xff, payload.length & 0xff);
+  } else {
+    header.push(127);
+    const len = Buffer.alloc(8);
+    len.writeBigUInt64BE(BigInt(payload.length));
+    header.push(...len);
+  }
+  return Buffer.concat([Buffer.from(header), payload]);
+}
+
+export async function createHttpBridge(runtime, { port = 3000, host = '0.0.0.0' } = {}) {
+  const wsClients = new Map();
+
+  function broadcast(event) {
+    const frame = encodeWsFrame(JSON.stringify(event));
+    for (const [id, socket] of wsClients) {
+      try { socket.write(frame); }
+      catch { wsClients.delete(id); }
+    }
+  }
+
+  const server = createServer(async (req, res) => {
+    const url = new URL(req.url, `http://${req.headers.host}`);
+    const path = url.pathname;
+
+    if (req.method === 'OPTIONS') return cors(res);
+
+    try {
+      // Health check
+      if (path === '/health') {
+        return json(res, { ok: true, sessionId: runtime.session.id, uptime: process.uptime() });
+      }
+
+      // Run a prompt — POST /run { prompt: "..." }
+      if (path === '/run' && req.method === 'POST') {
+        const body = await parseBody(req);
+        const prompt = body.prompt ?? body.message ?? '';
+        if (!prompt) return json(res, { error: 'prompt is required' }, 400);
+
+        const result = await runtime.run(prompt, {
+          onTextChunk(chunk) {
+            broadcast({ type: 'chunk', chunk, timestamp: Date.now() });
+          },
+        });
+        broadcast({ type: 'complete', traceId: result.traceId, turns: result.turns?.length ?? 0 });
+        return json(res, {
+          finalText: result.finalText,
+          turns: result.turns?.length ?? 0,
+          stopReason: result.stopReason,
+          usage: result.usage,
+          traceId: result.traceId,
+          activeSkill: result.activeSkill,
+        });
+      }
+
+      // Stream run — POST /stream { prompt: "..." }
+      // Server-Sent Events
+      if (path === '/stream' && req.method === 'POST') {
+        const body = await parseBody(req);
+        const prompt = body.prompt ?? body.message ?? '';
+        if (!prompt) return json(res, { error: 'prompt is required' }, 400);
+
+        res.writeHead(200, {
+          'Content-Type': 'text/event-stream',
+          'Cache-Control': 'no-cache',
+          'Connection': 'keep-alive',
+          'Access-Control-Allow-Origin': '*',
+        });
+
+        const result = await runtime.run(prompt, {
+          onTextChunk(chunk) {
+            res.write(`data: ${JSON.stringify({ type: 'chunk', chunk })}\n\n`);
+          },
+        });
+
+        res.write(`data: ${JSON.stringify({
+          type: 'complete',
+          finalText: result.finalText,
+          turns: result.turns?.length ?? 0,
+          stopReason: result.stopReason,
+          usage: result.usage,
+          traceId: result.traceId,
+        })}\n\n`);
+        res.end();
+        return;
+      }
+
+      // Command dispatch — POST /command/:name { ...args }
+      if (path.startsWith('/command/') && req.method === 'POST') {
+        const name = path.slice('/command/'.length);
+        const args = await parseBody(req);
+        const result = await runtime.dispatchCommand(name, args);
+        return json(res, result);
+      }
+
+      // GET endpoints
+      if (req.method === 'GET') {
+        if (path === '/session') return json(res, runtime.session);
+        if (path === '/providers') return json(res, runtime.providers.list());
+        if (path === '/tools') return json(res, runtime.tools.list().map(({ name, capability, description }) => ({ name, capability, description })));
+        if (path === '/agents') return json(res, runtime.agents.list());
+        if (path === '/tasks') return json(res, runtime.tasks.list());
+        if (path === '/workers') return json(res, runtime.listWorkers());
+        if (path === '/traces') {
+          const traces = await runtime.telemetry.queryTraces({
+            traceId: url.searchParams.get('traceId'),
+            agentId: url.searchParams.get('agentId'),
+            since: url.searchParams.get('since'),
+          });
+          return json(res, traces);
+        }
+      }
+
+      json(res, { error: 'Not found' }, 404);
+    } catch (error) {
+      json(res, { error: error instanceof Error ? error.message : String(error) }, 500);
+    }
+  });
+
+  // WebSocket upgrade
+  server.on('upgrade', (req, socket, head) => {
+    if (req.url !== '/ws') {
+      socket.destroy();
+      return;
+    }
+    const ws = acceptWebSocket(req, socket, head);
+    if (!ws) return;
+    const clientId = randomBytes(8).toString('hex');
+    wsClients.set(clientId, ws);
+
+    let buffer = Buffer.alloc(0);
+    ws.on('data', async (data) => {
+      buffer = Buffer.concat([buffer, data]);
+      while (true) {
+        const frame = decodeWsFrame(buffer);
+        if (!frame) break;
+        buffer = buffer.slice(frame.totalLength);
+        if (frame.opcode === 8) { // close
+          wsClients.delete(clientId);
+          ws.end();
+          return;
+        }
+        if (frame.opcode === 1) { // text
+          try {
+            const msg = JSON.parse(frame.data.toString('utf8'));
+            if (msg.type === 'run' && msg.prompt) {
+              const result = await runtime.run(msg.prompt, {
+                onTextChunk(chunk) {
+                  try { ws.write(encodeWsFrame(JSON.stringify({ type: 'chunk', chunk }))); } catch {}
+                },
+              });
+              ws.write(encodeWsFrame(JSON.stringify({
+                type: 'complete',
+                finalText: result.finalText,
+                turns: result.turns?.length ?? 0,
+                usage: result.usage,
+                traceId: result.traceId,
+              })));
+            } else if (msg.type === 'command') {
+              const result = await runtime.dispatchCommand(msg.name, msg.args ?? {});
+              ws.write(encodeWsFrame(JSON.stringify({ type: 'command-result', name: msg.name, result })));
+            }
+          } catch (err) {
+            ws.write(encodeWsFrame(JSON.stringify({ type: 'error', error: err.message })));
+          }
+        }
+      }
+    });
+    ws.on('close', () => wsClients.delete(clientId));
+    ws.on('error', () => wsClients.delete(clientId));
+
+    ws.write(encodeWsFrame(JSON.stringify({ type: 'connected', clientId, sessionId: runtime.session.id })));
+  });
+
+  return new Promise((resolve) => {
+    server.listen(port, host, () => {
+      const addr = server.address();
+      resolve({
+        server,
+        port: addr.port,
+        host,
+        url: `http://${host === '0.0.0.0' ? 'localhost' : host}:${addr.port}`,
+        wsUrl: `ws://${host === '0.0.0.0' ? 'localhost' : host}:${addr.port}/ws`,
+        clientCount: () => wsClients.size,
+        close: () => new Promise((r) => {
+          for (const ws of wsClients.values()) try { ws.end(); } catch {}
+          wsClients.clear();
+          server.close(r);
+        }),
+      });
+    });
+  });
+}
