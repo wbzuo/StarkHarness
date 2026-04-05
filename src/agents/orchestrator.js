@@ -28,12 +28,44 @@ export class AgentOrchestrator {
   #workers = new Map();
   #cursor = 0;
 
-  constructor({ agents, tasks, scheduler, executor, inbox }) {
+  constructor({ agents, tasks, scheduler, executor, inbox, state = null, telemetry = null }) {
     this.agents = agents;
     this.tasks = tasks;
     this.scheduler = scheduler;
     this.executor = executor;
     this.inbox = inbox;
+    this.state = state;
+    this.telemetry = telemetry;
+  }
+
+  #snapshotWorker(worker) {
+    return {
+      agentId: worker.agentId,
+      pollIntervalMs: worker.pollIntervalMs,
+      maxMessagesPerTick: worker.maxMessagesPerTick,
+      timeoutMs: worker.timeoutMs,
+      maxRestarts: worker.maxRestarts,
+      restartDelayMs: worker.restartDelayMs,
+      restarts: worker.restarts,
+      status: worker.status,
+      lastError: worker.lastError,
+      failures: worker.failures,
+      processedMessages: worker.processedMessages,
+      processedRequests: worker.processedRequests,
+      processedResponses: worker.processedResponses,
+      lastStartedAt: worker.lastStartedAt,
+      lastStoppedAt: worker.lastStoppedAt,
+      lastHeartbeatAt: worker.lastHeartbeatAt,
+    };
+  }
+
+  async #persistWorker(worker) {
+    if (this.state) {
+      await this.state.saveAgentWorker(worker.agentId, this.#snapshotWorker(worker));
+    }
+    if (this.telemetry) {
+      await this.telemetry.emit('worker:state', this.#snapshotWorker(worker));
+    }
   }
 
   #orderedIdleAgents() {
@@ -42,6 +74,8 @@ export class AgentOrchestrator {
       .sort((left, right) => {
         const backlog = this.inbox.count(left.id) - this.inbox.count(right.id);
         if (backlog !== 0) return backlog;
+        const dispatchDelta = Number(left.dispatchCount ?? 0) - Number(right.dispatchCount ?? 0);
+        if (dispatchDelta !== 0) return dispatchDelta;
         return left.id.localeCompare(right.id);
       });
     if (idle.length <= 1) return idle;
@@ -57,7 +91,13 @@ export class AgentOrchestrator {
     try {
       const result = await raceWithControls(() => this.executor.execute(agent, task, { onTextChunk }), { signal, timeoutMs });
       this.tasks.update(task.id, { status: 'completed', result, completedAt: new Date().toISOString() });
-      this.agents.update(agent.id, { status: 'idle', currentTaskId: null, lastResult: result.finalText ?? '', lastError: null });
+      this.agents.update(agent.id, {
+        status: 'idle',
+        currentTaskId: null,
+        lastResult: result.finalText ?? '',
+        lastError: null,
+        completedTasks: Number(agent.completedTasks ?? 0) + 1,
+      });
       this.inbox.send(agent.id, { from: 'orchestrator', body: `Task ${task.id} completed`, status: 'delivered' });
       return { agentId: agent.id, taskId: task.id, finalText: result.finalText, stopReason: result.stopReason };
     } catch (error) {
@@ -96,7 +136,11 @@ export class AgentOrchestrator {
       });
       if (!agent) continue;
       this.scheduler.assign(task, agent);
-      this.agents.update(agent.id, { status: 'running', currentTaskId: task.id });
+      this.agents.update(agent.id, {
+        status: 'running',
+        currentTaskId: task.id,
+        dispatchCount: Number(agent.dispatchCount ?? 0) + 1,
+      });
       reserved.add(agent.id);
       assignments.push({ task, agent });
       this.#advanceCursor(preferredAgents);
@@ -153,6 +197,7 @@ export class AgentOrchestrator {
         const messages = this.inbox.consumeWork(agentId, worker.maxMessagesPerTick);
         if (messages.length === 0) {
           worker.lastHeartbeatAt = new Date().toISOString();
+          await this.#persistWorker(worker);
           await delay(worker.pollIntervalMs, undefined, { ref: false });
           continue;
         }
@@ -163,6 +208,7 @@ export class AgentOrchestrator {
           if (message.kind === 'request') worker.processedRequests += 1;
           if (message.kind === 'response') worker.processedResponses += 1;
           worker.lastHeartbeatAt = new Date().toISOString();
+          await this.#persistWorker(worker);
         }
       }
     };
@@ -202,9 +248,11 @@ export class AgentOrchestrator {
         try {
           worker.status = worker.restarts > 0 ? 'restarting' : 'running';
           worker.lastStartedAt = new Date().toISOString();
+          await this.#persistWorker(worker);
           await this.#createWorkerLoop(agentId, worker)();
           worker.status = 'stopped';
           worker.lastStoppedAt = new Date().toISOString();
+          await this.#persistWorker(worker);
           return;
         } catch (error) {
           worker.lastError = error instanceof Error ? error.message : String(error);
@@ -212,6 +260,7 @@ export class AgentOrchestrator {
           if (worker.controller.signal.aborted) {
             worker.status = 'stopped';
             worker.lastStoppedAt = new Date().toISOString();
+            await this.#persistWorker(worker);
             return;
           }
           if (worker.restarts >= worker.maxRestarts) {
@@ -223,18 +272,22 @@ export class AgentOrchestrator {
               currentMessageId: null,
               lastError: worker.lastError,
             });
+            await this.#persistWorker(worker);
             throw error;
           }
           worker.restarts += 1;
           worker.status = 'restarting';
+          await this.#persistWorker(worker);
           await delay(worker.restartDelayMs, undefined, { ref: false });
         }
       }
       worker.status = 'stopped';
+      await this.#persistWorker(worker);
     };
 
     worker.promise = supervise();
     this.#workers.set(agentId, worker);
+    void this.#persistWorker(worker);
     return worker;
   }
 
@@ -243,46 +296,13 @@ export class AgentOrchestrator {
     if (!worker) return false;
     worker.controller.abort();
     await worker.promise.catch(() => {});
+    await this.#persistWorker(worker);
     this.#workers.delete(agentId);
     return true;
   }
 
   listWorkers() {
-    return [...this.#workers.values()].map(({
-      agentId,
-      pollIntervalMs,
-      maxMessagesPerTick,
-      timeoutMs,
-      maxRestarts,
-      restartDelayMs,
-      restarts,
-      status,
-      lastError,
-      failures,
-      processedMessages,
-      processedRequests,
-      processedResponses,
-      lastStartedAt,
-      lastStoppedAt,
-      lastHeartbeatAt,
-    }) => ({
-      agentId,
-      pollIntervalMs,
-      maxMessagesPerTick,
-      timeoutMs,
-      maxRestarts,
-      restartDelayMs,
-      restarts,
-      status,
-      lastError,
-      failures,
-      processedMessages,
-      processedRequests,
-      processedResponses,
-      lastStartedAt,
-      lastStoppedAt,
-      lastHeartbeatAt,
-    }));
+    return [...this.#workers.values()].map((worker) => this.#snapshotWorker(worker));
   }
 
   consumeInbox(agentId, { limit = Infinity } = {}) {

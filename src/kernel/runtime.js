@@ -55,7 +55,8 @@ export async function createRuntime(options = {}) {
     ? await state.loadRuntimeSnapshot().catch(() => ({ tasks: [], agents: [], inbox: {}, permissions: {}, plugins: [] }))
     : { tasks: [], agents: [], inbox: {}, permissions: {}, plugins: [] };
   const filePolicy = await loadPolicyFile(options.policyPath, { includeDefaults: false });
-  const providerConfig = await loadProviderConfig(options.providerConfigPath);
+  const loadedProviderConfig = await loadProviderConfig(options.providerConfigPath);
+  const providerConfig = { ...loadedProviderConfig, ...(options.providerConfig ?? {}) };
   const profilePolicy = getSandboxProfile(options.sandboxProfile);
   const policy = mergePolicy(profilePolicy, filePolicy);
 
@@ -287,14 +288,20 @@ export async function createRuntime(options = {}) {
       const workerIds = this.orchestrator.listWorkers().map((worker) => worker.agentId);
       await Promise.all(workerIds.map((agentId) => this.orchestrator.stopWorker(agentId)));
       await this.hooks.fire('SessionEnd', { sessionId: this.session.id, cwd: this.session.cwd });
+      const clearedPending = this.inbox.clearPending('runtime-shutdown');
       const disconnects = [...this.mcpClients.values()].map((client) => client.disconnect().catch(() => {}));
       await Promise.all(disconnects);
-      await this.log('runtime:shutdown', { sessionId: this.session.id, mcpClients: this.mcpClients.size, workers: workerIds.length });
+      await this.log('runtime:shutdown', {
+        sessionId: this.session.id,
+        mcpClients: this.mcpClients.size,
+        workers: workerIds.length,
+        clearedPending: clearedPending.length,
+      });
     },
   };
 
   runtime.executor = new AgentExecutor(runtime);
-  runtime.orchestrator = new AgentOrchestrator({ agents, tasks, scheduler, executor: runtime.executor, inbox });
+  runtime.orchestrator = new AgentOrchestrator({ agents, tasks, scheduler, executor: runtime.executor, inbox, state, telemetry });
   loop.setRuntime(runtime);
   runner.setRuntime(runtime);
   await runtime.persist();
@@ -317,11 +324,13 @@ export function createBlueprintDocument(runtime) {
     orchestration: {
       taskCount: runtime.tasks.list().length,
       agentCount: runtime.agents.list().length,
+      workerCount: runtime.listWorkers().length,
       pluginCount: runtime.plugins.list().length,
       commandCount: runtime.commands.list().length,
       toolCount: runtime.tools.list().length,
       hookEventCount: runtime.hooks.listEvents().length,
       pluginConflictCount: runtime.pluginDiagnostics.commandConflicts.length + runtime.pluginDiagnostics.toolConflicts.length,
+      mailbox: runtime.inbox.stats(),
     },
     policy: runtime.permissions.snapshot(),
     plugins: {

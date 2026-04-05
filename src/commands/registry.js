@@ -147,6 +147,13 @@ export function createCommandRegistry() {
       },
     },
     {
+      name: 'mailbox',
+      description: 'Show mailbox queue and pending-response diagnostics',
+      async execute(runtime) {
+        return runtime.inbox.stats();
+      },
+    },
+    {
       name: 'repl',
       description: 'Start the interactive StarkHarness REPL',
       async execute(runtime) {
@@ -186,6 +193,20 @@ export function createCommandRegistry() {
       description: 'Load persisted state for an agent',
       async execute(runtime, args = {}) {
         return runtime.state.loadAgentState(args.agent ?? args.id ?? 'agent-1');
+      },
+    },
+    {
+      name: 'worker-state',
+      description: 'Load persisted worker metrics for an agent',
+      async execute(runtime, args = {}) {
+        return runtime.state.loadAgentWorker(args.agent ?? args.id ?? 'agent-1');
+      },
+    },
+    {
+      name: 'worker-state',
+      description: 'Load persisted worker metrics for an agent',
+      async execute(runtime, args = {}) {
+        return runtime.state.loadAgentWorker(args.agent ?? args.id ?? 'agent-1');
       },
     },
     {

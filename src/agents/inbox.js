@@ -94,7 +94,15 @@ export class AgentInbox {
         this.#pending.delete(key);
         reject(new Error(`response-timeout:${correlationId}`));
       }, timeoutMs);
-      Object.assign(entry, { resolve, reject, timeout });
+      Object.assign(entry, {
+        resolve,
+        reject,
+        timeout,
+        createdAt: new Date().toISOString(),
+        timeoutAt: new Date(Date.now() + timeoutMs).toISOString(),
+        agentId,
+        correlationId,
+      });
     });
     entry.promise = promise;
     this.#pending.set(key, entry);
@@ -155,6 +163,26 @@ export class AgentInbox {
     return [...this.#pending.keys()];
   }
 
+  pendingSnapshot() {
+    return [...this.#pending.entries()].map(([key, entry]) => ({
+      key,
+      createdAt: entry.createdAt ?? null,
+      timeoutAt: entry.timeoutAt ?? null,
+      agentId: entry.agentId ?? null,
+      correlationId: entry.correlationId ?? null,
+    }));
+  }
+
+  clearPending(reason = 'cleared') {
+    const cleared = this.pendingSnapshot();
+    for (const [key, entry] of this.#pending.entries()) {
+      clearTimeout(entry.timeout);
+      entry.reject(new Error(reason));
+      this.#pending.delete(key);
+    }
+    return cleared;
+  }
+
   stats() {
     const agents = {};
     for (const [agentId, messages] of this.#messages.entries()) {
@@ -167,6 +195,7 @@ export class AgentInbox {
     return {
       totalQueued: this.totalCount(),
       pendingResponses: this.pendingCount(),
+      pending: this.pendingSnapshot(),
       agents,
     };
   }

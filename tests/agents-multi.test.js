@@ -160,6 +160,8 @@ test('AgentOrchestrator worker loop consumes inbox requests and writes replies',
   assert.equal(worker.processedRequests >= 1, true);
   const agentState = await runtime.state.loadAgentState('agent-1');
   assert.equal(agentState.handledMessages >= 1, true);
+  const workerState = await runtime.state.loadAgentWorker('agent-1');
+  assert.equal(workerState.processedMessages >= 1, true);
   await runtime.shutdown();
 });
 
@@ -210,4 +212,32 @@ test('AgentOrchestrator restarts failed workers within the configured budget', a
   assert.equal(worker.restarts, 1);
   assert.ok(['running', 'restarting'].includes(worker.status));
   await orchestrator.stopWorker('agent-1');
+});
+
+test('AgentExecutor supports process-isolated agents', async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'starkharness-process-agent-'));
+  const runtime = await createRuntime({ stateDir: path.join(root, '.starkharness'), session: { cwd: root, goal: 'process-agent' } });
+  const agent = runtime.agents.spawn({
+    id: 'agent-1',
+    role: 'reviewer',
+    description: 'isolated worker',
+    isolation: 'process',
+    tools: ['read_file'],
+  });
+  const task = runtime.tasks.create({ id: 'task-1', subject: 'review', status: 'pending' });
+  const chunks = [];
+
+  const result = await runtime.executor.execute(agent, task, {
+    onTextChunk: async (chunk) => {
+      chunks.push(chunk);
+    },
+  });
+
+  assert.equal(result.isolation, 'process');
+  assert.equal(result.agentId, 'agent-1');
+  assert.ok(result.finalText.startsWith('stub:'), 'process child should complete through the provider path');
+  assert.equal(chunks.length > 0, true);
+  const agentState = await runtime.state.loadAgentState('agent-1');
+  assert.equal(agentState.completedTasks, 1);
+  await runtime.shutdown();
 });

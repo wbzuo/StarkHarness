@@ -451,6 +451,30 @@ test('runtime.shutdown disconnects all MCP clients', async () => {
   assert.equal(disconnected, 2);
 });
 
+test('runtime.shutdown clears pending mailbox waiters', async () => {
+  const { runtime } = await makeRuntime();
+  const pending = runtime.awaitResponse('agent-1', 'corr-1', { timeoutMs: 1000 }).catch((error) => error);
+  const mailbox = await runtime.dispatchCommand('mailbox');
+  assert.equal(mailbox.pendingResponses, 1);
+  await runtime.shutdown();
+  const error = await pending;
+  assert.match(error.message, /runtime-shutdown/);
+});
+
+test('worker-state command returns persisted worker metrics', async () => {
+  const { runtime } = await makeRuntime();
+  runtime.agents.spawn({ id: 'agent-1', role: 'reviewer', description: 'worker' });
+  const request = runtime.inbox.request('agent-1', { from: 'agent-0', body: 'hello worker' });
+  runtime.executor.executeMessage = async () => ({ finalText: 'pong', stopReason: 'end_turn', usage: {} });
+  runtime.startWorker('agent-1', { pollIntervalMs: 1, maxMessagesPerTick: 1, timeoutMs: 100 });
+  await runtime.awaitResponse('agent-0', request.correlationId).catch(() => null);
+  await new Promise((resolve) => setTimeout(resolve, 5));
+  await runtime.stopWorker('agent-1');
+  const workerState = await runtime.dispatchCommand('worker-state', { agent: 'agent-1' });
+  assert.equal(workerState.processedMessages >= 1, true);
+  await runtime.shutdown();
+});
+
 test('completeWithStrategy uses provider capabilities from registered providers', async () => {
   const { ProviderRegistry } = await import('../src/providers/index.js');
   const registry = new ProviderRegistry({});

@@ -35,6 +35,10 @@ export class StateStore {
     return path.join(this.getAgentRoot(agentId), 'transcript.jsonl');
   }
 
+  getAgentWorkerPath(agentId) {
+    return path.join(this.getAgentRoot(agentId), 'worker.json');
+  }
+
   async saveSession(session) {
     const target = this.getSessionPath(session.id);
     await writeFile(target, JSON.stringify(session, null, 2), 'utf8');
@@ -100,5 +104,19 @@ export class StateStore {
     await mkdir(root, { recursive: true });
     await appendFile(this.getAgentTranscriptPath(agentId), `${JSON.stringify(entry)}\n`, 'utf8');
     return this.getAgentTranscriptPath(agentId);
+  }
+
+  async saveAgentWorker(agentId, worker) {
+    const root = this.getAgentRoot(agentId);
+    await mkdir(root, { recursive: true });
+    const target = this.getAgentWorkerPath(agentId);
+    await writeFile(target, JSON.stringify(worker, null, 2), 'utf8');
+    return target;
+  }
+
+  async loadAgentWorker(agentId) {
+    const target = this.getAgentWorkerPath(agentId);
+    const content = await readFile(target, 'utf8');
+    return JSON.parse(content);
   }
 }

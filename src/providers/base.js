@@ -24,6 +24,18 @@ export function createStubProvider({ id, purpose, modelFamily }) {
     purpose,
     modelFamily,
     async complete(request) {
+      if (request.messages || request.tools) {
+        const latestUserMessage = [...(request.messages ?? [])]
+          .reverse()
+          .find((message) => message.role === 'user');
+        const text = `stub:${id}:${typeof latestUserMessage?.content === 'string' ? latestUserMessage.content : ''}`.trim();
+        return {
+          text,
+          toolCalls: [],
+          stopReason: 'end_turn',
+          usage: { input_tokens: 0, output_tokens: 0 },
+        };
+      }
       return createProviderResponse({
         provider: id,
         modelFamily,

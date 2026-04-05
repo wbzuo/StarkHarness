@@ -242,6 +242,7 @@ export function createBuiltinTools() {
           scope: { type: 'string', description: 'Scope restriction for the agent' },
           prompt: { type: 'string', description: 'Task description for the agent' },
           model: { type: 'string', description: 'Model override (inherit, sonnet, opus, haiku)' },
+          isolation: { type: 'string', enum: ['inline', 'process'], description: 'Execution isolation mode for the agent' },
           tools: { type: 'array', items: { type: 'string' }, description: 'Tool whitelist' },
         },
         required: ['role'],
