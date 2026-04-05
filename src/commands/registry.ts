@@ -148,6 +148,33 @@ export function createCommandRegistry() {
       },
     },
     {
+      name: 'observability-status',
+      description: 'Show enterprise observability integration status',
+      async execute(runtime) {
+        return {
+          observability: runtime.observability?.status?.() ?? null,
+          telemetry: runtime.env?.telemetry ?? null,
+        };
+      },
+    },
+    {
+      name: 'feature-flags',
+      description: 'Show the current merged feature flags from env and remote config',
+      async execute(runtime) {
+        return runtime.featureFlags?.getAll?.() ?? {};
+      },
+    },
+    {
+      name: 'growthbook-sync',
+      description: 'Refresh remote feature flags from a configured GrowthBook endpoint',
+      async execute(runtime) {
+        return {
+          flags: await runtime.refreshFeatureFlags(),
+          status: runtime.featureFlags?.status?.() ?? null,
+        };
+      },
+    },
+    {
       name: 'smoke-test',
       description: 'Execute a read_file turn to verify harness wiring end-to-end',
       async execute(runtime) {

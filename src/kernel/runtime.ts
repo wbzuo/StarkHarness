@@ -32,6 +32,8 @@ import { SkillLoader } from '../skills/loader.js';
 import { matchAndBind } from '../skills/binder.js';
 import { AgentRunner } from './runner.js';
 import { describeWebAccess } from '../web-access/index.js';
+import { createObservabilityManager } from '../enterprise/observability.js';
+import { createFeatureFlagManager } from '../enterprise/growthbook.js';
 
 function createSnapshot(runtime) {
   return {
@@ -98,6 +100,8 @@ export async function createRuntime(options = {}) {
   const cwd = session.cwd ?? process.cwd();
   const context = createContextEnvelope({ cwd, mode: session.mode });
   const webAccess = await describeWebAccess({ cwd, env: envConfig.raw });
+  const observability = createObservabilityManager(envConfig.telemetry);
+  const featureFlags = createFeatureFlagManager(envConfig.telemetry);
 
   // Memory and skills bind to session.cwd (correct for both new and resumed sessions)
   const memory = new MemoryManager({ projectDir: projectDir });
@@ -238,6 +242,8 @@ export async function createRuntime(options = {}) {
     webAccess,
     app: options.app ?? null,
     env: envConfig,
+    observability,
+    featureFlags,
     scheduler,
     executor: null,
     orchestrator: null,
@@ -251,7 +257,9 @@ export async function createRuntime(options = {}) {
       return this.trace;
     },
     async log(eventName, payload) {
-      return this.telemetry.emit(eventName, payload, this.trace);
+      const event = await this.telemetry.emit(eventName, payload, this.trace);
+      await this.observability.report(eventName, payload);
+      return event;
     },
     async dispatchTurn(turn, options = {}) {
       await this.log('turn:start', turn);
@@ -338,6 +346,9 @@ export async function createRuntime(options = {}) {
     listWorkers() {
       return this.orchestrator.listWorkers();
     },
+    async refreshFeatureFlags() {
+      return this.featureFlags.sync();
+    },
     async shutdown() {
       const workerIds = this.orchestrator.listWorkers().map((worker) => worker.agentId);
       await Promise.all(workerIds.map((agentId) => this.orchestrator.stopWorker(agentId)));
@@ -387,6 +398,8 @@ export function createBlueprintDocument(runtime) {
       },
       telemetry: runtime.env.telemetry,
     } : null,
+    observability: runtime.observability.status(),
+    featureFlags: runtime.featureFlags.getAll(),
     orchestration: {
       taskCount: runtime.tasks.list().length,
       agentCount: runtime.agents.list().length,

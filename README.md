@@ -133,6 +133,13 @@ Real-time execution is already a first-class concern:
 - **Live Providers**: Anthropic and OpenAI-compatible adapters support real tool loops and streaming responses.
 - **Execution Isolation**: Local and process isolation are implemented today; Docker profiles exist but remain an early path.
 
+### 🏢 6. Enterprise Control + Observability (`src/enterprise/`, `src/config/`)
+The runtime now has a first-pass enterprise operations layer:
+- **Custom Monitoring**: Post runtime events to a custom monitoring endpoint.
+- **Custom Sentry**: Forward error-class events to a configured Sentry DSN.
+- **GrowthBook / Feature Flags**: Pull remote flags and merge them with local env-defined flags.
+- **Enterprise Commands**: Inspect observability, login/provider readiness, and merged feature flags directly from the CLI or bridge.
+
 ---
 
 ## 🔍 Deep Dive: Built-in Capabilities
@@ -173,6 +180,9 @@ Execute commands via `node --import tsx src/main.ts <command>`.
 | `app-status` | **App Metadata**: Show the loaded `starkharness.app.json` metadata. |
 | `env-status` | **Env Config**: Show resolved `.env` values, feature switches, and bridge config. |
 | `login-status` | **Provider Login**: Show which provider backends are configured and ready. |
+| `observability-status` | **Enterprise Telemetry**: Show monitoring and Sentry integration status. |
+| `feature-flags` | **Rollout State**: Show merged local and remote feature flags. |
+| `growthbook-sync` | **Remote Flags**: Refresh feature flags from GrowthBook-compatible config. |
 | `web-access-status` | **Browser/Web Status**: Show bundled `web-access` availability, scripts, and proxy endpoint details. |
 | `auto` | **Auto Mode**: Run the app automation default prompt or command without hand-written CLI choreography. |
 | `run` | **Agent Loop**: Execute a full provider-backed agent run for a prompt. |
@@ -292,6 +302,7 @@ starter/
 
 - **Already solid**: runtime assembly, multi-turn execution, mailbox-driven multi-agent orchestration, bridge authz, persistence, telemetry, and replay-oriented diagnostics.
 - **Partially implemented**: MCP beyond tool loading, higher-level web strategy beyond the current browser primitives, Docker isolation, and the richer TUI described in the roadmap.
+- **Enterprise baseline available**: observability hooks, custom Sentry, GrowthBook-compatible remote flags, and remote-control diagnostics now exist as first-pass integrations.
 - **Still early**: the package is `0.1.0`, remains `private`, and the repository does not yet ship a root `LICENSE` file.
 
 For a grounded walkthrough of these tradeoffs, start with the [Architecture Deep Dive](./docs/architecture-deep-dive.md) and the [Contributor Guide](./docs/contributor-guide.md).
