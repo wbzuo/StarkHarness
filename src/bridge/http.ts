@@ -7,6 +7,7 @@
 
 import { createServer } from 'node:http';
 import { randomBytes, createHash } from 'node:crypto';
+import { createDocsSiteHtml } from '../ui/site.js';
 
 function parseBody(req) {
   return new Promise((resolve, reject) => {
@@ -171,6 +172,13 @@ export async function createHttpBridge(runtime, { port = 3000, host = '127.0.0.1
     const permissions = getContextualPermissions(req, url);
 
     try {
+      if (path === '/docs' && req.method === 'GET') {
+        const html = createDocsSiteHtml({ runtime });
+        res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+        res.end(html);
+        return;
+      }
+
       // Health check
       if (path === '/health') {
         return json(res, { ok: true, sessionId: runtime.session.id, uptime: process.uptime() });

@@ -22,6 +22,29 @@
 - [Architecture Deep Dive](./docs/architecture-deep-dive.md)
 - [Contributor Guide](./docs/contributor-guide.md)
 - [Roadmap](./ROADMAP.md)
+- [Auto Mode](./docs/auto-mode.md)
+- [Remote Control](./docs/remote-control.md)
+- [Providers & Login](./docs/providers-and-login.md)
+- [Web Search](./docs/web-search.md)
+- [Debug](./docs/debug.md)
+
+---
+
+## 🌐 Docs Site
+
+When bridge mode is running, open:
+
+- `/docs`
+
+The docs site is a dynamic, browser-based control surface. It combines:
+
+- live runtime health
+- app/env/web-access status
+- blueprint and provider visibility
+- quick links to the written docs
+- a prompt playground backed by the active runtime
+
+This is the primary V3 documentation experience on top of the bridge.
 
 ---
 

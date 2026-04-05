@@ -22,6 +22,29 @@
 - [架构深潜](./docs/architecture-deep-dive.zh-CN.md)
 - [贡献者指南](./docs/contributor-guide.zh-CN.md)
 - [Roadmap](./ROADMAP.md)
+- [Auto Mode](./docs/auto-mode.md)
+- [Remote Control](./docs/remote-control.md)
+- [Providers & Login](./docs/providers-and-login.md)
+- [Web Search](./docs/web-search.md)
+- [Debug](./docs/debug.md)
+
+---
+
+## 🌐 Docs Site
+
+当 bridge 模式运行时，直接打开：
+
+- `/docs`
+
+这个 docs site 是一个动态可视化控制台，会把这些内容放到同一个浏览器页面里：
+
+- live runtime 健康状态
+- app / env / web-access 状态
+- blueprint 与 provider 可视化信息
+- 文档入口链接
+- 基于当前 runtime 的 prompt playground
+
+这就是当前 V3 的主要文档体验层。
 
 ---
 

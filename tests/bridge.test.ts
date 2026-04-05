@@ -220,6 +220,21 @@ test('HTTP bridge exposes env and web-access endpoints', async () => {
   }
 });
 
+test('HTTP bridge serves dynamic docs site', async () => {
+  const ctx = await makeBridge();
+  try {
+    const res = await fetch(`${ctx.bridge.url}/docs`);
+    const html = await res.text();
+    assert.equal(res.status, 200);
+    assert.match(res.headers.get('content-type') ?? '', /text\/html/);
+    assert.match(html, /Dynamic Docs/);
+    assert.match(html, /Run Playground/);
+    assert.match(html, /Architecture Deep Dive/);
+  } finally {
+    await closeBridge(ctx);
+  }
+});
+
 test('HTTP bridge dispatches command', async () => {
   const ctx = await makeBridge();
   try {
