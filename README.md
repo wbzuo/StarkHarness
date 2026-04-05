@@ -3,7 +3,7 @@
 <p align="center">
   <img src="https://img.shields.io/badge/Node.js-20+-green.svg" alt="Node.js Version">
   <img src="https://img.shields.io/badge/Dependencies-Zero-blue.svg" alt="Zero Dependencies">
-  <img src="https://img.shields.io/badge/Tests-145%20Passed-brightgreen.svg" alt="Tests">
+  <img src="https://img.shields.io/badge/Tests-node%3Atest-brightgreen.svg" alt="Tests">
   <img src="https://img.shields.io/badge/Security-Multi--Tenant%20Authz-blue.svg" alt="Security">
 </p>
 
@@ -14,6 +14,13 @@
 **StarkHarness** is an atomic, high-intensity harness designed for building full-feature AI coding agents. Unlike simple wrappers, it provides a clean, dependency-free **Agent Operating System (AOS)** that implements the core orchestration logic found in world-class tools like Claude Code.
 
 > [**English**] | [**简体中文](./README.zh-CN.md)
+
+---
+
+## 📚 Read This Next
+
+- [Architecture Deep Dive](./docs/architecture-deep-dive.md)
+- [Contributor Guide](./docs/contributor-guide.md)
 
 ---
 
@@ -52,21 +59,24 @@ Built-in support for hierarchical agent swarms:
 - **`Inbox`**: Implements an asynchronous message bus for inter-agent communication.
 - **`Executor`**: Runs dangerous or specialized turns in isolated sub-runtimes.
 
-### 🛡️ 2. Multi-Tenant Authz (`src/bridge/`)
-Beyond simple authentication, StarkHarness implements **Token-to-Profile** mapping:
+### 🛡️ 2. Bridge + Authz Profiles (`src/bridge/`, `src/permissions/`)
+Beyond simple authentication, StarkHarness already implements **Token-to-Profile** mapping:
 - **`tokenProfiles`**: Map different API keys to specific sandbox profiles.
 - **Contextual Isolation**: Each request uses its own `PermissionEngine` instance, ensuring that a "Viewer" token cannot escalate to "Admin" capabilities.
-- **Secure Bridge**: Auth via `Authorization: Bearer` (HTTP) or `?token=` (WS).
+- **Secure Bridge**: Auth via `Authorization: Bearer` (HTTP) or `?token=` (WS), plus HTTP, SSE, and WebSocket runtime surfaces.
 
-### 🔌 3. Fine-Grained Subscriptions (`src/bridge/ws`)
-Real-time monitoring with precision:
+### 🔌 3. MCP + Dynamic Tool Surface (`src/mcp/`, `src/tools/`)
+The runtime combines built-in tools with protocol-driven extension points:
+- **Built-in Workspace Tools**: File IO, search, shell, delegation, and task primitives ship by default.
+- **MCP Tool Injection**: Remote MCP tools are registered dynamically as namespaced StarkHarness tools.
+- **JSON Schema Registry**: The tool surface is exported in schema form for the agent loop and external clients.
+
+### 📡 4. Streaming Bridge And Live Providers (`src/bridge/`, `src/providers/`)
+Real-time execution is already a first-class concern:
 - **Filters**: Subscribe to specific `traceId` or `agentId` to filter out background noise.
 - **Topic-Based**: Group events by `runs`, `logs`, or `system`.
-- **Live Context**: Streamed `tool_use` events with full trace ancestry.
-
-### 🛡️ 4. Execution Sandbox (`src/runtime/sandbox.js`)
-- **Physical Isolation**: Optional environment isolation for `shell` and `exec` commands.
-- **Resource Limits**: Hard caps on CPU, Memory, and Time per tool call.
+- **Live Providers**: Anthropic and OpenAI-compatible adapters support real tool loops and streaming responses.
+- **Execution Isolation**: Local and process isolation are implemented today; Docker profiles exist but remain an early path.
 
 ---
 
@@ -75,10 +85,13 @@ Real-time monitoring with precision:
 | Tool | Capability | Advanced Features |
 | :--- | :--- | :--- |
 | `read_file` | `read` | **Line Slicing**: `offset` and `limit` for surgical reading. |
+| `search` | `read` | **Workspace Search**: Text search with optional glob filtering. |
 | `edit_file` | `write` | **Global Replace**: `replace_all: true` for bulk updates. |
 | `shell` | `exec` | **Safe Execution**: `/bin/sh -c` with 120s timeout and 4MB buffer. |
-| `mcp` | `protocol` | **Bridge**: Unified interface for protocol-based tool extension. |
+| `fetch_url` | `network` | **Remote Context**: Fetch HTTP content directly into the runtime. |
 | `spawn_agent` | `delegate` | **Orchestrated**: Create sub-agents with specific role whitelists. |
+
+MCP tools are not a single hardcoded builtin. They are loaded dynamically and exposed with names like `mcp__server__tool`.
 
 ---
 
@@ -88,12 +101,15 @@ Execute commands via `node src/main.js <command>`.
 
 | Command | Purpose |
 | :--- | :--- |
+| `blueprint` | **Runtime Blueprint**: Print the assembled runtime surface and active capabilities. |
 | `registry` | **Full Diagnostic**: Lists all tools, commands, providers, and plugin conflicts. |
 | `doctor` | **Health Check**: Validates harness wiring and system surfaces. |
+| `run` | **Agent Loop**: Execute a full provider-backed agent run for a prompt. |
+| `repl` / `chat` | **Interactive Mode**: Start the readline-based local REPL. |
+| `serve` | **Bridge Mode**: Start the HTTP, SSE, and WebSocket bridge. |
 | `smoke-test` | **Quick Verification**: Runs an end-to-end `read_file` turn loop. |
-| `transcript` | **Event Log**: Replays the full harness event log with optional filters. |
-| `playback` | **Summary**: Summarizes transcript events for quick status checks. |
-| `replay-runner` | **Execution Plan**: Deterministically re-runs recorded agent turns. |
+| `transcript` / `playback` | **Event Log**: Replay or summarize transcript events. |
+| `replay-turn` / `replay-runner` | **Replay Aids**: Reconstruct recorded turn flow and replay plans. |
 
 ---
 
@@ -101,17 +117,32 @@ Execute commands via `node src/main.js <command>`.
 
 ```text
 src/
-├── kernel/          # Turn loop, session, hooks, and prompt builder
+├── kernel/          # Runtime composition, turn loop, session, hooks, and prompts
 ├── permissions/     # Permission engine and sandbox profiles
 ├── tools/           # JSON Schema tool definitions (Built-in + MCP)
-├── providers/       # Live adapters for Anthropic & OpenAI (Streaming)
-├── agents/          # Orchestrator, Inbox, and specialized Executors
-├── bridge/          # Secure HTTP/WS communication with Auth & Subscriptions
+├── providers/       # Anthropic/OpenAI-compatible providers and strategy layer
+├── agents/          # Orchestrator, Inbox, Manager, and Executors
+├── commands/        # Built-in command registry and diagnostics
+├── bridge/          # HTTP/SSE/WebSocket runtime bridge with authz profiles
+├── mcp/             # MCP stdio client, config parsing, and tool mapping
 ├── runtime/         # Execution sandbox and isolation logic
 ├── tasks/           # Scheduler and task state machine
 ├── memory/          # CLAUDE.md + Dynamic learned context
+├── skills/          # Skill discovery and runtime prompt binding
+├── state/           # Session, agent, and worker persistence
+├── ui/              # REPL surface
 └── telemetry/       # Event logging and distributed trace (traces.jsonl)
 ```
+
+---
+
+## 🧭 Current Maturity
+
+- **Already solid**: runtime assembly, multi-turn execution, mailbox-driven multi-agent orchestration, bridge authz, persistence, telemetry, and replay-oriented diagnostics.
+- **Partially implemented**: MCP beyond tool loading, Docker isolation, and the richer TUI described in the roadmap.
+- **Still early**: the package is `0.1.0`, remains `private`, and the repository does not yet ship a root `LICENSE` file.
+
+For a grounded walkthrough of these tradeoffs, start with the [Architecture Deep Dive](./docs/architecture-deep-dive.md) and the [Contributor Guide](./docs/contributor-guide.md).
 
 ---
 
@@ -128,4 +159,4 @@ src/
 
 ## 📄 License
 
-MIT. Designed for researchers and engineers exploring the boundaries of AI agent runtimes.
+The repository currently does not ship a root `LICENSE` file. If MIT is the intended license, add a `LICENSE` file before treating the project as MIT-licensed in downstream use.
