@@ -44,6 +44,51 @@ function createSessionSummary(runtime) {
   };
 }
 
+function createStatusSummary(runtime) {
+  return {
+    app: runtime.app
+      ? {
+        name: runtime.app.name,
+        version: runtime.app.version,
+        startup: runtime.app.startup,
+        automation: runtime.app.automation,
+      }
+      : null,
+    session: createSessionSummary(runtime),
+    providers: runtime.env ? {
+      anthropic: Boolean(runtime.env.providers?.anthropic?.apiKey),
+      openai: Boolean(runtime.env.providers?.openai?.apiKey),
+      compatible: Boolean(runtime.env.providers?.compatible?.apiKey),
+    } : {},
+    features: {
+      webAccess: runtime.env?.features?.webAccess ?? true,
+      remoteControl: runtime.env?.features?.remoteControl ?? true,
+      autoMode: runtime.env?.features?.autoMode ?? false,
+      autoUpdate: runtime.env?.features?.autoUpdate ?? false,
+      debug: runtime.env?.features?.debug ?? false,
+    },
+    webAccess: {
+      available: runtime.webAccess?.available ?? false,
+      ready: runtime.webAccess?.ready ?? false,
+      proxyUrl: runtime.webAccess?.proxyUrl ?? null,
+    },
+    bridge: runtime.env?.bridge ?? {},
+    observability: runtime.observability?.status?.() ?? null,
+    workers: {
+      active: runtime.listWorkers().length,
+      queuedMessages: runtime.inbox.totalCount(),
+      pendingResponses: runtime.inbox.pendingCount?.() ?? 0,
+    },
+    counts: {
+      commands: runtime.commands.list().length,
+      tools: runtime.tools.list().length,
+      agents: runtime.agents.list().length,
+      tasks: runtime.tasks.list().length,
+      plugins: runtime.plugins.list().length,
+    },
+  };
+}
+
 export function createCommandRegistry() {
   return [
     {
@@ -76,6 +121,13 @@ export function createCommandRegistry() {
             bridge: runtime.env.bridge,
           } : null,
         };
+      },
+    },
+    {
+      name: 'status',
+      description: 'Show a product-style runtime status summary',
+      async execute(runtime) {
+        return createStatusSummary(runtime);
       },
     },
     {
