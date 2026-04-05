@@ -584,6 +584,17 @@ test('web-access-status command reports bundled skill metadata', async () => {
   await runtime.shutdown();
 });
 
+test('status command returns a consolidated runtime view', async () => {
+  const { runtime } = await makeRuntime();
+  const status = await runtime.dispatchCommand('status');
+  assert.equal(typeof status.counts.tools, 'number');
+  assert.equal(typeof status.counts.commands, 'number');
+  assert.equal(typeof status.providers.openai, 'boolean');
+  assert.equal(typeof status.features.remoteControl, 'boolean');
+  assert.equal(typeof status.webAccess.available, 'boolean');
+  await runtime.shutdown();
+});
+
 test('auto command uses app automation default prompt when no prompt is provided', async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), 'starkharness-auto-mode-'));
   await writeFile(path.join(root, 'starkharness.app.json'), JSON.stringify({

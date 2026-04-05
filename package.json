@@ -4,6 +4,9 @@
   "private": true,
   "description": "Atomic full-feature agent harness scaffold inspired by Claude Code-class runtimes.",
   "type": "module",
+  "workspaces": [
+    "packages/*"
+  ],
   "bin": {
     "starkharness": "./bin/starkharness.mjs"
   },

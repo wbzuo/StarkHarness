@@ -14,6 +14,7 @@
     "resolveJsonModule": true
   },
   "include": [
+    "packages/**/*.ts",
     "src/**/*.ts",
     "tests/**/*.ts",
     "examples/**/*.ts",
