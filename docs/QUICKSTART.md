@@ -61,11 +61,12 @@ GET  /providers           — Registered providers
 GET  /tools               — Available tools
 GET  /agents              — Agent list
 GET  /tasks               — Task list
-GET  /inspect             — Web Inspector real-time dashboard
+GET  /docs                — Dynamic browser docs and runtime dashboard
+GET  /docs/page?name=...  — Local docs page from the active workspace
 
 POST /run    {"prompt":"..."} — Synchronous chat
 POST /stream {"prompt":"..."} — SSE streaming output
-POST /command {"name":"doctor"} — Execute a command
+POST /command/doctor {}       — Execute a command
 
 WS   /ws                  — WebSocket real-time subscription
 ```
@@ -101,8 +102,8 @@ my-agent/
 |---------|-------------|
 | **Runtime** | Core runtime that assembles all subsystems |
 | **Provider** | LLM backend (Anthropic / OpenAI / Compatible) |
-| **Tool** | Callable capability for agents (read_file, shell, web_search, etc. — 21 built-in) |
-| **Command** | CLI command (doctor, status, run, serve, etc. — ~50 registered) |
+| **Tool** | Callable capability for agents (read_file, shell, web_search, browser, voice, etc. — currently 28 built-in in the default runtime) |
+| **Command** | CLI command (doctor, status, run, serve, swarm, plugins, background jobs, etc. — currently 90 registered in the default runtime) |
 | **Agent** | Independent execution unit with role, tools, and mailbox |
 | **Task** | Schedulable work unit with dependencies, retries, and dead letter queue |
 | **Hook** | Interceptor (PreToolUse / PostToolUse / Stop) |
@@ -136,9 +137,14 @@ node --import tsx src/main.ts auto
 ## 9. Coordinator Mode
 
 ```bash
-# Enter coordinator mode — agent can only delegate, not execute directly
+# Enter coordinator mode on the current session
 node --import tsx src/main.ts enter-coordinator-mode
 
+# Resume that same session later and keep the mode
+node --import tsx src/main.ts sessions
+node --import tsx src/main.ts resume <session-id>
+
+# Or use coordinator mode interactively inside REPL/TUI-backed workflows
 # Tools restricted to: spawn_agent, send_message, tasks
 ```
 
