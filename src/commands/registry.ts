@@ -542,7 +542,7 @@ export function createCommandRegistry() {
         if (!sessionName) throw new Error('swarm-stop requires --session or --id');
         const result = await stopTmuxSwarm(sessionName);
         const entries = await runtime.state.loadSwarmSessions();
-        await runtime.state.saveSwarmSessions(entries.filter((entry) => entry.sessionName !== sessionName));
+        await runtime.state.saveSwarmSessions(entries.filter((entry) => entry.sessionName !== result.sessionName));
         return result;
       },
     },
@@ -724,7 +724,7 @@ export function createCommandRegistry() {
             filePath: path.resolve(runtime.context.cwd, args.dxt),
             targetDir: pluginsDir,
           });
-          runtime.plugins.register(installed.manifest);
+          await runtime.activatePluginManifest?.(installed.manifest);
           return installed;
         } else if (args.url) {
           const response = await fetch(args.url);
@@ -737,7 +737,7 @@ export function createCommandRegistry() {
         }
         const filePath = path.join(pluginsDir, `${manifest.name}.json`);
         await writeFile(filePath, JSON.stringify(manifest, null, 2), 'utf8');
-        runtime.plugins.register(manifest);
+        await runtime.activatePluginManifest?.(manifest);
         return {
           ok: true,
           filePath,
@@ -839,8 +839,11 @@ export function createCommandRegistry() {
       async execute(runtime, args = {}) {
         const pluginsDir = runtime.app?.paths?.pluginsDir ?? path.join(runtime.context.cwd, 'plugins');
         const filePath = path.join(pluginsDir, `${args.name}.json`);
+        const contentPath = path.join(pluginsDir, args.name);
         await rm(filePath, { force: true });
-        return { ok: true, filePath };
+        await rm(contentPath, { recursive: true, force: true });
+        await runtime.deactivatePlugin?.(args.name);
+        return { ok: true, filePath, contentPath };
       },
     },
     {
@@ -1286,6 +1289,10 @@ export function createCommandRegistry() {
 
 export class CommandRegistry {
   #commands = new Map();
+
+  clear() {
+    this.#commands.clear();
+  }
 
   constructor(definitions = []) {
     definitions.forEach((command) => this.register(command));

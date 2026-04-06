@@ -108,3 +108,74 @@ test('remote bridge polling executes remote commands and acknowledges them', asy
     await server.close();
   }
 });
+
+test('remote bridge status falls back to the session id when no explicit client id is configured', async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'starkharness-remote-status-'));
+  const envConfig = await loadRuntimeEnv({
+    cwd: root,
+    env: {
+      ...process.env,
+      STARKHARNESS_REMOTE_BRIDGE_URL: 'https://remote.example/bridge',
+    },
+  });
+  const runtime = await createRuntime({
+    stateDir: path.join(root, '.starkharness'),
+    session: { cwd: root, goal: 'remote-status' },
+    envConfig,
+  });
+
+  try {
+    const status = await runtime.dispatchCommand('remote-status');
+    assert.equal(status.clientId, runtime.session.id);
+  } finally {
+    await runtime.shutdown();
+  }
+});
+
+test('remote bridge polling acknowledges execution failures', async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'starkharness-remote-fail-'));
+  const events = [];
+  const server = await withServer((req, res) => {
+    if (req.url?.startsWith('/bridge/next')) {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ type: 'command', name: 'missing-command', args: {} }));
+      return;
+    }
+    if (req.url === '/bridge/ack' && req.method === 'POST') {
+      let body = '';
+      req.on('data', (chunk) => { body += chunk; });
+      req.on('end', () => {
+        events.push(JSON.parse(body));
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: true }));
+      });
+      return;
+    }
+    res.writeHead(204);
+    res.end();
+  });
+
+  try {
+    const envConfig = await loadRuntimeEnv({
+      cwd: root,
+      env: {
+        ...process.env,
+        STARKHARNESS_REMOTE_BRIDGE_URL: `${server.url}/bridge`,
+        STARKHARNESS_REMOTE_BRIDGE_CLIENT_ID: 'client-fail',
+      },
+    });
+    const runtime = await createRuntime({
+      stateDir: path.join(root, '.starkharness'),
+      session: { cwd: root, goal: 'remote-fail' },
+      envConfig,
+    });
+
+    await assert.rejects(() => runtime.dispatchCommand('remote-poll'), /Unknown command/);
+    assert.equal(events.length, 1);
+    assert.equal(events[0].ok, false);
+    assert.equal(events[0].name, 'missing-command');
+    await runtime.shutdown();
+  } finally {
+    await server.close();
+  }
+});

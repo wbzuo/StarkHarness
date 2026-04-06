@@ -1,4 +1,4 @@
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { createHmac } from 'node:crypto';
 import path from 'node:path';
 import { validatePluginManifest } from './loader.js';
@@ -122,14 +122,54 @@ function parseZipEntries(buffer) {
   return entries;
 }
 
-const SIGNATURE_PREFIX = 'stark-sig:';
-
-function computeManifestSignature(manifestBuffer, secretKey) {
-  return createHmac('sha256', secretKey).update(manifestBuffer).digest('hex');
+function resolveEntryPath(targetDir, entryName) {
+  const destination = path.resolve(targetDir, entryName);
+  const relative = path.relative(targetDir, destination);
+  if (relative.startsWith('..') || path.isAbsolute(relative)) {
+    throw new Error(`invalid-dxt-package:unsafe-entry:${entryName}`);
+  }
+  return destination;
 }
 
-export function signDxtPackage(archiveBuffer, manifestBuffer, secretKey) {
-  const signature = computeManifestSignature(manifestBuffer, secretKey);
+function normalizeDxtEntryName(entryName) {
+  const normalized = String(entryName ?? '').replaceAll('\\', '/');
+  const segments = normalized.split('/').filter(Boolean);
+  if (!segments.length || normalized.startsWith('/') || /^[A-Za-z]:\//.test(normalized) || segments.some((segment) => segment === '.' || segment === '..')) {
+    throw new Error(`invalid-dxt-package:unsafe-entry:${entryName}`);
+  }
+  return segments.join('/');
+}
+
+const SIGNATURE_PREFIX = 'stark-sig:';
+
+function createLengthPrefix(length) {
+  const prefix = Buffer.alloc(4);
+  prefix.writeUInt32BE(length, 0);
+  return prefix;
+}
+
+function computeArchiveSignature(archiveBuffer, secretKey) {
+  const hmac = createHmac('sha256', secretKey);
+  const entries = parseZipEntries(archiveBuffer).map((entry) => ({
+    name: normalizeDxtEntryName(entry.name),
+    content: entry.content,
+  }));
+
+  hmac.update(createLengthPrefix(entries.length));
+  for (const entry of entries) {
+    const nameBuffer = Buffer.from(entry.name, 'utf8');
+    hmac.update(createLengthPrefix(nameBuffer.length));
+    hmac.update(nameBuffer);
+    hmac.update(createLengthPrefix(entry.content.length));
+    hmac.update(entry.content);
+  }
+
+  return hmac.digest('hex');
+}
+
+export function signDxtPackage(archiveBuffer, manifestBufferOrSecretKey, maybeSecretKey) {
+  const secretKey = maybeSecretKey ?? manifestBufferOrSecretKey;
+  const signature = computeArchiveSignature(archiveBuffer, secretKey);
   const comment = Buffer.from(`${SIGNATURE_PREFIX}${signature}`, 'utf8');
 
   // Patch EOCD to include ZIP comment with signature
@@ -154,12 +194,7 @@ export function verifyDxtSignature(archiveBuffer, secretKey) {
   if (!comment.startsWith(SIGNATURE_PREFIX)) return { valid: false, reason: 'no-signature-prefix' };
   const embeddedSig = comment.slice(SIGNATURE_PREFIX.length);
 
-  // Extract plugin.json content from the archive
-  const entries = parseZipEntries(archiveBuffer);
-  const pluginEntry = entries.find((e) => e.name === 'plugin.json');
-  if (!pluginEntry) return { valid: false, reason: 'plugin-json-missing' };
-
-  const expected = computeManifestSignature(pluginEntry.content, secretKey);
+  const expected = computeArchiveSignature(archiveBuffer, secretKey);
   const valid = embeddedSig === expected;
   return { valid, reason: valid ? 'ok' : 'signature-mismatch' };
 }
@@ -177,10 +212,11 @@ export async function packagePluginAsDxt({ manifestPath, outputPath, include = [
   }];
 
   for (const file of include) {
-    const absolute = path.resolve(baseDir, file);
+    const entryName = normalizeDxtEntryName(file);
+    const absolute = path.resolve(baseDir, entryName);
     const data = await readFile(absolute);
     entries.push({
-      name: file.split(path.sep).join('/'),
+      name: entryName,
       data,
     });
   }
@@ -206,7 +242,7 @@ export async function packagePluginAsDxt({ manifestPath, outputPath, include = [
 
   const signed = Boolean(signingKey);
   if (signingKey) {
-    archive = signDxtPackage(archive, entries[0].data, signingKey);
+    archive = signDxtPackage(archive, signingKey);
   }
 
   const target = path.resolve(outputPath ?? path.join(baseDir, `${manifest.name}.dxt`));
@@ -227,7 +263,7 @@ export async function validateDxtPackage(input, { signingKey } = {}) {
   const entries = parseZipEntries(buffer);
   const pluginEntry = entries.find((entry) => entry.name === 'plugin.json');
   if (!pluginEntry) throw new Error('invalid-dxt-package:plugin-json-missing');
-  if (pluginEntry.compressionMethod !== 0) {
+  if (entries.some((entry) => entry.compressionMethod !== 0)) {
     throw new Error('invalid-dxt-package:unsupported-compression');
   }
   const manifest = JSON.parse(pluginEntry.content.toString('utf8'));
@@ -250,10 +286,24 @@ export async function validateDxtPackage(input, { signingKey } = {}) {
 }
 
 export async function installDxtPackage({ filePath, packagePath, targetDir, pluginsDir } = {}) {
-  const validated = await validateDxtPackage(packagePath ?? filePath);
-  const manifestPath = path.join(path.resolve(targetDir ?? pluginsDir ?? process.cwd()), `${validated.manifest.name}.json`);
-  await mkdir(path.dirname(manifestPath), { recursive: true });
-  await writeFile(manifestPath, JSON.stringify(validated.manifest, null, 2), 'utf8');
+  const sourcePath = path.resolve(packagePath ?? filePath);
+  const validated = await validateDxtPackage(sourcePath);
+  const installRoot = path.resolve(targetDir ?? pluginsDir ?? process.cwd());
+  const buffer = await readFile(sourcePath);
+  const entries = parseZipEntries(buffer);
+  const contentRoot = path.join(installRoot, validated.manifest.name);
+  await rm(contentRoot, { recursive: true, force: true });
+
+  for (const entry of entries) {
+    const normalizedName = normalizeDxtEntryName(entry.name);
+    const destination = normalizedName === 'plugin.json'
+      ? resolveEntryPath(installRoot, `${validated.manifest.name}.json`)
+      : resolveEntryPath(contentRoot, normalizedName);
+    await mkdir(path.dirname(destination), { recursive: true });
+    await writeFile(destination, entry.content);
+  }
+
+  const manifestPath = resolveEntryPath(installRoot, `${validated.manifest.name}.json`);
   return {
     ok: true,
     manifest: validated.manifest,

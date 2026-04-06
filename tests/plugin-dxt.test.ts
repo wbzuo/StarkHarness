@@ -40,6 +40,33 @@ test('packagePluginAsDxt, validateDxtPackage, and installDxtPackage work togethe
   assert.equal(saved.name, 'dxt-pack');
 });
 
+test('installDxtPackage keeps included files under a plugin-specific directory', async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'starkharness-dxt-assets-'));
+  const manifestPath = path.join(root, 'plugin.json');
+  const assetPath = path.join(root, 'assets', 'prompt.md');
+  await writeFile(manifestPath, JSON.stringify({
+    name: 'dxt-assets',
+    version: '0.1.0',
+    capabilities: ['browser'],
+  }), 'utf8');
+  await import('node:fs/promises').then((fs) => fs.mkdir(path.dirname(assetPath), { recursive: true }));
+  await writeFile(assetPath, '# prompt\n', 'utf8');
+
+  const packed = await packagePluginAsDxt({
+    manifestPath,
+    include: ['assets/prompt.md'],
+  });
+  const installed = await installDxtPackage({
+    packagePath: packed.filePath,
+    pluginsDir: path.join(root, 'plugins'),
+  });
+
+  const saved = JSON.parse(await readFile(installed.manifestPath, 'utf8'));
+  const extracted = await readFile(path.join(root, 'plugins', 'dxt-assets', 'assets', 'prompt.md'), 'utf8');
+  assert.equal(saved.name, 'dxt-assets');
+  assert.equal(extracted, '# prompt\n');
+});
+
 test('plugin-trust and plugin-autoupdate refresh a trusted plugin manifest', async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), 'starkharness-plugin-autoupdate-'));
   const pluginsDir = path.join(root, 'plugins');
@@ -141,6 +168,37 @@ test('validateDxtPackage rejects tampered signature', async () => {
   );
 });
 
+test('validateDxtPackage rejects tampered included files when package is signed', async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'starkharness-dxt-tamper-include-'));
+  const manifestPath = path.join(root, 'plugin.json');
+  const assetPath = path.join(root, 'asset.txt');
+  await writeFile(manifestPath, JSON.stringify({
+    name: 'tamper-include-pack',
+    version: '1.0.0',
+    capabilities: ['test'],
+  }), 'utf8');
+  await writeFile(assetPath, 'asset-data', 'utf8');
+
+  const packed = await packagePluginAsDxt({
+    manifestPath,
+    include: ['asset.txt'],
+    signingKey: 'key-a',
+  });
+  const tamperedPath = path.join(root, 'tampered.dxt');
+  const buffer = await readFile(packed.filePath);
+  const original = Buffer.from('asset-data', 'utf8');
+  const offset = buffer.indexOf(original);
+  assert.notEqual(offset, -1);
+  original.copy(buffer, offset, 0, 5);
+  Buffer.from('evil!', 'utf8').copy(buffer, offset);
+  await writeFile(tamperedPath, buffer);
+
+  await assert.rejects(
+    () => validateDxtPackage({ packagePath: tamperedPath }, { signingKey: 'key-a' }),
+    (err) => err.message.includes('signature-mismatch'),
+  );
+});
+
 test('validateDxtPackage without signingKey skips verification', async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), 'starkharness-dxt-nosig-'));
   const manifestPath = path.join(root, 'plugin.json');
@@ -172,4 +230,19 @@ test('verifyDxtSignature returns no-signature for unsigned packages', async () =
   const result = verifyDxtSignature(buffer, 'any-key');
   assert.equal(result.valid, false);
   assert.equal(result.reason, 'no-signature');
+});
+
+test('packagePluginAsDxt rejects unsafe include paths', async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'starkharness-dxt-unsafe-'));
+  const manifestPath = path.join(root, 'plugin.json');
+  await writeFile(manifestPath, JSON.stringify({
+    name: 'unsafe-pack',
+    version: '1.0.0',
+    capabilities: ['test'],
+  }), 'utf8');
+
+  await assert.rejects(
+    () => packagePluginAsDxt({ manifestPath, include: ['../secret.txt'] }),
+    (error) => error.message.includes('unsafe-entry'),
+  );
 });

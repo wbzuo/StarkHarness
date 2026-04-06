@@ -6,6 +6,10 @@ function isWebSocketUrl(url = '') {
   return /^wss?:\/\//i.test(String(url));
 }
 
+function getRemoteBridgeClientId(runtime) {
+  return runtime.env?.bridge?.remoteBridgeClientId ?? runtime.session.id;
+}
+
 async function ackRemoteCommand(baseUrl, token, payload = {}) {
   if (!baseUrl) return;
   await fetch(`${baseUrl.replace(/\/+$/, '')}/ack`, {
@@ -24,7 +28,7 @@ export function describeRemoteBridge(envConfig = {}, state = {}) {
     enabled: Boolean(bridge.remoteBridgeUrl),
     url: bridge.remoteBridgeUrl ?? null,
     mode: isWebSocketUrl(bridge.remoteBridgeUrl) ? 'websocket' : 'poll',
-    clientId: bridge.remoteBridgeClientId ?? null,
+    clientId: state.clientId ?? bridge.remoteBridgeClientId ?? null,
     pollMs: bridge.remoteBridgePollMs ?? 5000,
     connected: Boolean(state.connected),
     lastPollAt: state.lastPollAt ?? null,
@@ -50,7 +54,8 @@ async function executeRemotePayload(runtime, payload = {}) {
 export async function pollRemoteBridge(runtime) {
   const baseUrl = runtime.env?.bridge?.remoteBridgeUrl;
   const token = runtime.env?.bridge?.remoteBridgeToken ?? null;
-  const clientId = runtime.env?.bridge?.remoteBridgeClientId ?? runtime.session.id;
+  const clientId = getRemoteBridgeClientId(runtime);
+  runtime.remoteBridgeState.clientId = clientId;
   if (!baseUrl) throw new Error('remote-bridge-url-missing');
   if (isWebSocketUrl(baseUrl)) {
     return {
@@ -74,20 +79,34 @@ export async function pollRemoteBridge(runtime) {
     throw new Error(runtime.remoteBridgeState.lastError);
   }
   const payload = await response.json();
-  const result = await executeRemotePayload(runtime, payload);
-  runtime.remoteBridgeState.lastCommandAt = new Date().toISOString();
-  runtime.remoteBridgeState.lastError = null;
-  await ackRemoteCommand(baseUrl, token, {
-    clientId,
-    type: payload.type ?? null,
-    name: payload.name ?? null,
-    ok: result?.ok !== false,
-  });
-  return {
-    ok: true,
-    payload,
-    result,
-  };
+  try {
+    const result = await executeRemotePayload(runtime, payload);
+    runtime.remoteBridgeState.lastCommandAt = new Date().toISOString();
+    runtime.remoteBridgeState.lastError = null;
+    await ackRemoteCommand(baseUrl, token, {
+      clientId,
+      type: payload.type ?? null,
+      name: payload.name ?? null,
+      ok: result?.ok !== false,
+    });
+    return {
+      ok: true,
+      payload,
+      result,
+    };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    runtime.remoteBridgeState.lastCommandAt = new Date().toISOString();
+    runtime.remoteBridgeState.lastError = message;
+    await ackRemoteCommand(baseUrl, token, {
+      clientId,
+      type: payload.type ?? null,
+      name: payload.name ?? null,
+      ok: false,
+      error: message,
+    });
+    throw error;
+  }
 }
 
 function sendSocketMessage(runtime, payload = {}) {
@@ -101,10 +120,12 @@ function sendSocketMessage(runtime, payload = {}) {
 
 async function handleWebSocketPayload(runtime, payload = {}) {
   if (payload.type === 'ping') {
-    sendSocketMessage(runtime, { type: 'pong', clientId: runtime.session.id });
+    sendSocketMessage(runtime, { type: 'pong', clientId: getRemoteBridgeClientId(runtime) });
     return;
   }
   const result = await executeRemotePayload(runtime, payload);
+  runtime.remoteBridgeState.lastCommandAt = new Date().toISOString();
+  runtime.remoteBridgeState.lastError = null;
   sendSocketMessage(runtime, {
     type: 'result',
     requestId: payload.requestId ?? null,
@@ -123,7 +144,8 @@ export function startRemoteBridge(runtime) {
     }
     const url = new URL(remoteUrl);
     const token = runtime.env?.bridge?.remoteBridgeToken ?? null;
-    const clientId = runtime.env?.bridge?.remoteBridgeClientId ?? runtime.session.id;
+    const clientId = getRemoteBridgeClientId(runtime);
+    runtime.remoteBridgeState.clientId = clientId;
     if (token) url.searchParams.set('token', token);
     url.searchParams.set('clientId', clientId);
     const socket = new WebSocket(url.toString());
@@ -144,9 +166,27 @@ export function startRemoteBridge(runtime) {
     socket.onmessage = (event) => {
       Promise.resolve()
         .then(() => JSON.parse(String(event.data)))
-        .then((payload) => handleWebSocketPayload(runtime, payload))
+        .then(async (payload) => {
+          try {
+            await handleWebSocketPayload(runtime, payload);
+          } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            runtime.remoteBridgeState.lastError = message;
+            sendSocketMessage(runtime, {
+              type: 'error',
+              requestId: payload.requestId ?? null,
+              name: payload.name ?? null,
+              error: message,
+            });
+          }
+        })
         .catch((error) => {
-          runtime.remoteBridgeState.lastError = error instanceof Error ? error.message : String(error);
+          const message = error instanceof Error ? error.message : String(error);
+          runtime.remoteBridgeState.lastError = message;
+          sendSocketMessage(runtime, {
+            type: 'error',
+            error: message,
+          });
         });
     };
 
@@ -161,6 +201,7 @@ export function startRemoteBridge(runtime) {
 
   if (runtime.remoteBridgeTimer) return describeRemoteBridge(runtime.env, runtime.remoteBridgeState);
   const pollMs = Number(runtime.env?.bridge?.remoteBridgePollMs ?? 5000);
+  runtime.remoteBridgeState.clientId = getRemoteBridgeClientId(runtime);
   runtime.remoteBridgeState.connected = true;
   runtime.remoteBridgeTimer = setInterval(() => {
     pollRemoteBridge(runtime).catch((error) => {

@@ -5,7 +5,7 @@ Remote Control is the bridge surface that turns StarkHarness into a controllable
 It now has two layers:
 
 - the local HTTP / SSE / WebSocket bridge
-- the remote bridge client that can poll a cloud control plane and execute returned commands or runs
+- the remote bridge client that can poll a cloud control plane or hold a WebSocket session and execute returned commands or runs
 
 ## HTTP Surface
 
@@ -28,6 +28,7 @@ Key endpoints:
 - `GET /traces`
 - `GET /docs`
 - `GET /docs/page?name=...`
+- `GET /inspect`
 - `POST /command/:name`
 - `POST /run`
 - `POST /stream`
@@ -46,12 +47,19 @@ Managed settings commands:
 - `settings-status`
 - `settings-sync`
 
-Current remote bridge mode is a dependency-free polling client, driven by:
+Remote bridge mode depends on the URL scheme:
+
+- `http://` / `https://` → polling mode via `/next` and `/ack`
+- `ws://` / `wss://` → WebSocket mode with `hello`, `ping` / `pong`, `command`, `run`, `result`, and event frames
+
+Remote bridge is driven by:
 
 - `STARKHARNESS_REMOTE_BRIDGE_URL`
 - `STARKHARNESS_REMOTE_BRIDGE_TOKEN`
 - `STARKHARNESS_REMOTE_BRIDGE_CLIENT_ID`
 - `STARKHARNESS_REMOTE_BRIDGE_POLL_MS`
+
+If `STARKHARNESS_REMOTE_BRIDGE_CLIENT_ID` is not set, the runtime falls back to the current `session.id`.
 
 Managed settings are driven by:
 
@@ -67,6 +75,8 @@ Managed settings are driven by:
 - command execution
 - subscriptions
 - filtered runtime events by topic, `traceId`, and `agentId`
+
+The remote bridge WebSocket client is a separate outbound connection from the local `/ws` server surface. It uses the configured remote bridge URL and reports command/run results back to the control plane.
 
 ## Local Docs Surface
 

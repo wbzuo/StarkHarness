@@ -112,6 +112,11 @@ test('remote bridge websocket mode receives commands and returns results', async
     const socket = instances[0];
     assert.ok(socket);
     assert.equal(socket.sent.some((entry) => entry.type === 'hello'), true);
+    socket.emitMessage({ type: 'ping' });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    const pong = socket.sent.find((entry) => entry.type === 'pong');
+    assert.ok(pong);
+    assert.equal(pong.clientId, 'remote-client');
 
     socket.emitMessage({ type: 'command', name: 'status', requestId: 'req-1' });
     await new Promise((resolve) => setTimeout(resolve, 20));
@@ -119,6 +124,72 @@ test('remote bridge websocket mode receives commands and returns results', async
     const result = socket.sent.find((entry) => entry.type === 'result' && entry.requestId === 'req-1');
     assert.ok(result);
     assert.equal(result.result.session.goal, 'remote-bridge');
+    await runtime.shutdown();
+  } finally {
+    globalThis.WebSocket = OriginalWebSocket;
+  }
+});
+
+test('remote bridge websocket mode reports execution failures back to the control plane', async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'starkharness-remote-bridge-fail-'));
+  const OriginalWebSocket = globalThis.WebSocket;
+  const instances = [];
+
+  class FakeWebSocket {
+    static OPEN = 1;
+
+    constructor(url) {
+      this.url = url;
+      this.readyState = FakeWebSocket.OPEN;
+      this.sent = [];
+      this.onopen = null;
+      this.onmessage = null;
+      this.onclose = null;
+      this.onerror = null;
+      instances.push(this);
+      queueMicrotask(() => this.onopen?.());
+    }
+
+    send(message) {
+      this.sent.push(JSON.parse(message));
+    }
+
+    close() {
+      this.readyState = 3;
+      this.onclose?.();
+    }
+
+    emitMessage(payload) {
+      this.onmessage?.({ data: JSON.stringify(payload) });
+    }
+  }
+
+  globalThis.WebSocket = FakeWebSocket;
+  try {
+    const envConfig = await loadRuntimeEnv({
+      cwd: root,
+      env: {
+        ...process.env,
+        STARKHARNESS_REMOTE_BRIDGE_URL: 'ws://remote.example/bridge',
+        STARKHARNESS_REMOTE_BRIDGE_CLIENT_ID: 'remote-client',
+      },
+    });
+    const runtime = await createRuntime({
+      stateDir: path.join(root, '.starkharness'),
+      session: { cwd: root, goal: 'remote-bridge-fail' },
+      envConfig,
+    });
+
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    const socket = instances[0];
+    assert.ok(socket);
+
+    socket.emitMessage({ type: 'command', name: 'missing-command', requestId: 'req-error' });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+
+    const errorEvent = socket.sent.find((entry) => entry.type === 'error' && entry.requestId === 'req-error');
+    assert.ok(errorEvent);
+    assert.match(errorEvent.error, /Unknown command/);
     await runtime.shutdown();
   } finally {
     globalThis.WebSocket = OriginalWebSocket;

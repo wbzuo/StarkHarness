@@ -24,7 +24,7 @@ ANTHROPIC_API_KEY=sk-ant-xxx
 
 # Or any OpenAI-compatible endpoint
 COMPATIBLE_API_KEY=xxx
-COMPATIBLE_BASE_URL=https://your-api.com/v1
+COMPATIBLE_BASE_URL=https://your-api.com
 ```
 
 ## 3. Six Running Modes
@@ -102,8 +102,8 @@ my-agent/
 |---------|-------------|
 | **Runtime** | Core runtime that assembles all subsystems |
 | **Provider** | LLM backend (Anthropic / OpenAI / Compatible) |
-| **Tool** | Callable capability for agents (read_file, shell, web_search, browser, voice, etc. — currently 28 built-in in the default runtime) |
-| **Command** | CLI command (doctor, status, run, serve, swarm, plugins, background jobs, etc. — currently 90 registered in the default runtime) |
+| **Tool** | Callable capability for agents (read_file, shell, web_search, browser, voice, etc. — built into the default runtime) |
+| **Command** | CLI command (doctor, status, run, serve, swarm, plugins, background jobs, etc. — all discoverable from `registry`) |
 | **Agent** | Independent execution unit with role, tools, and mailbox |
 | **Task** | Schedulable work unit with dependencies, retries, and dead letter queue |
 | **Hook** | Interceptor (PreToolUse / PostToolUse / Stop) |

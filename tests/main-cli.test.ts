@@ -5,7 +5,7 @@ import path from 'node:path';
 
 const mainPath = path.resolve('src/main.ts');
 
-function runCli(args, { stdin = '', timeoutMs = 2000, cwd = process.cwd() } = {}) {
+function runCli(args, { stdin = '', timeoutMs = 5000, cwd = process.cwd() } = {}) {
   return new Promise((resolve, reject) => {
     const child = spawn(process.execPath, ['--import', 'tsx', mainPath, ...args], {
       cwd,

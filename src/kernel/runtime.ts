@@ -130,6 +130,10 @@ export async function createRuntime(options = {}) {
   for (const tool of createBuiltinTools()) {
     tools.register(tool);
   }
+  const pluginToolConflicts = [];
+  const pluginCommandConflicts = [];
+  let createMcpToolProxy = null;
+  const mcpToolBindings = [];
 
   const telemetry = createTelemetrySink({ rootDir: stateDir });
   await telemetry.init();
@@ -158,18 +162,20 @@ export async function createRuntime(options = {}) {
     }
   } else if (options.app?.paths?.pluginsDir) {
     await plugins.loadManifestDir(options.app.paths.pluginsDir);
+  } else {
+    await plugins.loadManifestDir(path.join(projectDir, 'plugins'));
   }
   for (const plugin of options.plugins ?? []) {
     plugins.register(plugin);
   }
-  const builtinToolConflicts = tools.registerPluginTools(plugins.listTools());
+  pluginToolConflicts.push(...tools.registerPluginTools(plugins.listTools()));
 
   // MCP server loading (optional)
   const mcpClients = new Map();
   if (options.mcpConfig) {
     const { parseMcpConfig, validateMcpServer } = await import('../mcp/config.js');
     const { McpStdioClient } = await import('../mcp/client.js');
-    const { createMcpToolProxy } = await import('../mcp/tools.js');
+    ({ createMcpToolProxy } = await import('../mcp/tools.js'));
     const servers = parseMcpConfig(options.mcpConfig);
     for (const server of servers.filter((s) => !s.disabled)) {
       if (!validateMcpServer(server).valid) continue;
@@ -178,7 +184,9 @@ export async function createRuntime(options = {}) {
         await client.connect();
         const mcpTools = await client.listTools();
         for (const t of mcpTools) {
-          tools.register(createMcpToolProxy(server.name, t, client));
+          const proxy = createMcpToolProxy(server.name, t, client);
+          tools.register(proxy);
+          mcpToolBindings.push({ serverName: server.name, tool: t, client });
         }
         mcpClients.set(server.name, client);
       } catch (err) {
@@ -201,9 +209,12 @@ export async function createRuntime(options = {}) {
   const fileCommands = await discoverCommands(commandDirs);
   commands.registerMany(fileCommands.map(wrapFileCommand));
 
-  const builtinCommandConflicts = commands.registerPluginCommands(plugins.listCommands());
+  pluginCommandConflicts.push(...commands.registerPluginCommands(plugins.listCommands()));
 
-  const pluginDiagnostics = diagnosePluginConflicts(plugins, { builtinToolConflicts, builtinCommandConflicts });
+  const pluginDiagnostics = diagnosePluginConflicts(plugins, {
+    builtinToolConflicts: pluginToolConflicts,
+    builtinCommandConflicts: pluginCommandConflicts,
+  });
 
   // Auto-discover filesystem hooks (state-level → project-level, later dirs register later)
   const { discoverHooks } = await import('./hook-loader.js');
@@ -229,16 +240,54 @@ export async function createRuntime(options = {}) {
   // Fire SessionStart hooks
   const sessionStartResult = await hooks.fire('SessionStart', { sessionId: session.id, cwd: session.cwd });
 
-  // Build system prompt
-  const { claudeMd, memoryString } = await memory.toPromptStrings();
-  const systemPrompt = promptBuilder.build({
-    tools: tools.toSchemaList(),
-    claudeMd,
-    memory: memoryString,
-    hookContext: sessionStartResult.additionalContext ?? '',
-    cwd: session.cwd,
-  });
-  context.systemPrompt = systemPrompt;
+  async function rebuildSystemPrompt() {
+    const { claudeMd, memoryString } = await memory.toPromptStrings();
+    context.systemPrompt = promptBuilder.build({
+      tools: tools.toSchemaList(),
+      claudeMd,
+      memory: memoryString,
+      hookContext: sessionStartResult.additionalContext ?? '',
+      cwd: session.cwd,
+    });
+  }
+
+  function rebuildPluginDiagnostics() {
+    const next = diagnosePluginConflicts(plugins, {
+      builtinToolConflicts: pluginToolConflicts,
+      builtinCommandConflicts: pluginCommandConflicts,
+    });
+    pluginDiagnostics.commandConflicts = next.commandConflicts;
+    pluginDiagnostics.toolConflicts = next.toolConflicts;
+  }
+
+  function rebuildToolRegistry() {
+    tools.clear();
+    for (const tool of createBuiltinTools()) {
+      tools.register(tool);
+    }
+    pluginToolConflicts.splice(0, pluginToolConflicts.length, ...tools.registerPluginTools(plugins.listTools()));
+    if (createMcpToolProxy) {
+      for (const binding of mcpToolBindings) {
+        tools.register(createMcpToolProxy(binding.serverName, binding.tool, binding.client));
+      }
+    }
+  }
+
+  function rebuildCommandRegistry() {
+    commands.clear();
+    commands.registerMany(createCommandRegistry());
+    commands.registerMany(fileCommands.map(wrapFileCommand));
+    pluginCommandConflicts.splice(0, pluginCommandConflicts.length, ...commands.registerPluginCommands(plugins.listCommands()));
+  }
+
+  async function refreshPluginSurfaces() {
+    rebuildToolRegistry();
+    rebuildCommandRegistry();
+    rebuildPluginDiagnostics();
+    await rebuildSystemPrompt();
+  }
+
+  await rebuildSystemPrompt();
 
   // Agent loop
   const loop = new AgentLoop({ hooks, tools, permissions });
@@ -301,6 +350,7 @@ export async function createRuntime(options = {}) {
     askUserQuestion: options.askUserQuestion ?? null,
     replSessions: new Map(),
     remoteBridgeState: {
+      clientId: envConfig?.bridge?.remoteBridgeClientId ?? session.id,
       connected: false,
       lastPollAt: null,
       lastCommandAt: null,
@@ -445,6 +495,20 @@ export async function createRuntime(options = {}) {
     },
     describeRemoteBridge() {
       return describeRemoteBridge(this.env, this.remoteBridgeState);
+    },
+    async activatePluginManifest(manifest) {
+      const registered = this.plugins.register(manifest);
+      await refreshPluginSurfaces();
+      await this.persist();
+      return registered;
+    },
+    async deactivatePlugin(name) {
+      const removed = this.plugins.remove(name);
+      if (removed) {
+        await refreshPluginSurfaces();
+        await this.persist();
+      }
+      return removed;
     },
     startRemoteBridge() {
       return startRemoteBridge(this);

@@ -13,6 +13,10 @@ function createPluginTool(tool) {
 export class ToolRegistry {
   #tools = new Map();
 
+  clear() {
+    this.#tools.clear();
+  }
+
   register(tool) {
     this.#tools.set(tool.name, tool);
     return tool;

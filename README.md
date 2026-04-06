@@ -13,7 +13,7 @@
 
 **StarkHarness Codex** is the advanced TypeScript implementation of the StarkHarness core. Designed for high-reliability enterprise environments, it combines the orchestration logic of Claude Code with deep security analysis, multi-modal capabilities (Voice/Web), and professional observability.
 
-> [**English**] | [**简体中文](./README.zh-CN.md)
+> [**English**](./README.md) | [**简体中文**](./README.zh-CN.md)
 
 ---
 
@@ -60,32 +60,33 @@ Built for the future of UI:
 
 ### 🛠️ 4. Developer Tools Integration (`src/lsp/`, `src/ui/`)
 - **LSP Support**: Language Server Protocol integration for rich codebase diagnostics.
-- **Pro TUI**: A full-featured terminal UI implementation for a high-intensity developer experience.
+- **Terminal Dashboard (TUI)**: A dependency-free dashboard and prompt console for runtime status inspection. See `docs/architecture-deep-dive.md` for the current scope and limitations.
 - **Web Inspector**: Real-time visual dashboard at `http://127.0.0.1:3000/inspect` for tracing hooks, tokens, and multi-agent loops.
 
 ---
 
 ## 🚦 Developer Quick Start
 
-Requires **Node.js 20+** and **TypeScript 6.0**.
+Requires **Node.js 20+**.
 
 ```bash
 # 1. Setup environment
 git clone https://github.com/wbzuo/StarkHarness.git
-cd StarkHarness/Codex
+cd StarkHarness
 
-# 2. Install dependencies (if you run locally without pre-built bundles)
+# 2. Install dependencies
 npm install
 
-# 3. Setup CLI globally
-cd packages/cli && npm link && cd ../..
+# 3. Validate the local runtime
+npm run doctor
 
-# 4. Scaffolding your first agent
-stark init
-
-# 5. Start the Web Inspector and Bridge
-stark inspect
+# 4. Start the bridge and Web Inspector
+node --import tsx src/main.ts serve --port=3000
 ```
+
+Then open `http://127.0.0.1:3000/inspect`.
+
+For the maintained command guide, examples, and HTTP endpoint reference, read [docs/QUICKSTART.md](./docs/QUICKSTART.md).
 
 ---
 

@@ -234,7 +234,22 @@ test('HTTP bridge serves dynamic docs site', async () => {
     assert.match(res.headers.get('content-type') ?? '', /text\/html/);
     assert.match(html, /Dynamic Docs/);
     assert.match(html, /Run Playground/);
+    assert.match(html, /Open Inspector/);
     assert.match(html, /Architecture Deep Dive/);
+  } finally {
+    await closeBridge(ctx);
+  }
+});
+
+test('HTTP bridge serves the browser inspector shell', async () => {
+  const ctx = await makeBridge();
+  try {
+    const res = await fetch(`${ctx.bridge.url}/inspect`);
+    const html = await res.text();
+    assert.equal(res.status, 200);
+    assert.match(html, /StarkHarness Inspector/);
+    assert.match(html, /Live Event Stream/);
+    assert.match(html, /Trace Details/);
   } finally {
     await closeBridge(ctx);
   }

@@ -108,6 +108,11 @@ The active line now includes all earlier milestones plus:
 - interactive permission prompts for normal interactive CLI flows, not just REPL
 - coordinator mode now enforces a restricted tool surface instead of relying only on prompt wording
 - agent summaries now prefer an LLM summary and fall back to text truncation only when needed
+- remote bridge now supports both polling and WebSocket control-plane modes, with stable `clientId`, `ping` / `pong`, and failure reporting
+- plugin install, uninstall, and autoupdate now refresh the live runtime command/tool surface without requiring restart
+- DXT archives now preserve bundled files, validate signed bundle contents, and clean extracted content on uninstall / reinstall
+- tmux swarm launch now respects pane working directory and custom CLI command wiring
+- Quick Start is now bilingual and covered by automatic command/endpoint consistency tests
 
 ## Current Reading Guide
 

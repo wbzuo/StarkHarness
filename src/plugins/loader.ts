@@ -42,6 +42,12 @@ export class PluginLoader {
     return normalized;
   }
 
+  remove(name) {
+    const before = this.#plugins.length;
+    this.#plugins = this.#plugins.filter((plugin) => plugin.name !== name);
+    return before !== this.#plugins.length;
+  }
+
   async loadManifestFile(manifestPath) {
     const content = await readFile(manifestPath, 'utf8');
     return this.register(JSON.parse(content));

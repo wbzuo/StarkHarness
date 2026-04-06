@@ -8,6 +8,8 @@ function escapeHtml(value) {
 export const DOC_PAGES = [
   { id: 'readme', title: 'README', path: 'README.md' },
   { id: 'readme-zh', title: 'README (简体中文)', path: 'README.zh-CN.md' },
+  { id: 'quickstart', title: 'Quick Start', path: 'docs/QUICKSTART.md' },
+  { id: 'quickstart-zh', title: 'Quick Start (简体中文)', path: 'docs/QUICKSTART.zh-CN.md' },
   { id: 'architecture', title: 'Architecture Deep Dive', path: 'docs/architecture-deep-dive.md' },
   { id: 'contributor-guide', title: 'Contributor Guide', path: 'docs/contributor-guide.md' },
   { id: 'roadmap', title: 'Roadmap', path: 'ROADMAP.md' },
@@ -268,7 +270,7 @@ export function createDocsSiteHtml({ runtime }) {
       margin-top: 12px;
       flex-wrap: wrap;
     }
-    button {
+    button, .button-link {
       appearance: none;
       border: 0;
       border-radius: 999px;
@@ -277,8 +279,12 @@ export function createDocsSiteHtml({ runtime }) {
       background: linear-gradient(135deg, var(--accent), var(--accent-2));
       color: #0b1117;
       cursor: pointer;
+      text-decoration: none;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
     }
-    button.secondary {
+    button.secondary, .button-link.secondary {
       background: transparent;
       color: var(--text);
       border: 1px solid var(--line);
@@ -337,6 +343,7 @@ export function createDocsSiteHtml({ runtime }) {
           <div class="tag"><b>V11 Active Line</b><span class="subtitle">Scaffold, app manifest, env config, remote control, voice, swarm, and docs tooling.</span></div>
           <div class="tag"><b>Live Bridge</b><span class="subtitle">Inspect runtime state and execute prompts without leaving the browser.</span></div>
           <div class="tag"><b>Bundled Web Access</b><span class="subtitle">CDP-aware browser primitives, voice transcription, and site-context helpers are built in.</span></div>
+          <div class="tag"><b>Visual Surfaces</b><span class="subtitle">Use Dynamic Docs for runtime browsing and Inspector for trace-by-trace event monitoring.</span></div>
         </div>
         <div class="metrics">
           <div class="metric"><div class="label">Commands</div><div class="value" id="metric-commands">-</div></div>
@@ -374,6 +381,7 @@ export function createDocsSiteHtml({ runtime }) {
           <button id="run-btn">Run Prompt</button>
           <button id="doctor-btn" class="secondary">Fetch Doctor</button>
           <button id="registry-btn" class="secondary">Fetch Registry</button>
+          <a class="button-link secondary" href="/inspect" target="_blank" rel="noreferrer">Open Inspector</a>
         </div>
         <div id="console" class="console">Ready.</div>
       </div>

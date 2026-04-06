@@ -108,6 +108,11 @@
 - 普通交互式 CLI 也具备权限审批提示，不再只局限于 REPL
 - coordinator mode 现在会真正限制工具面，而不是只靠 system prompt 提示
 - agent summary 现在优先尝试 LLM 摘要，失败时才回退到文本截断
+- remote bridge 现在同时支持 polling 与 WebSocket 控制平面，并补齐了稳定的 `clientId`、`ping` / `pong` 与失败回报
+- plugin install、uninstall 与 autoupdate 现在会在当前 runtime 中立即刷新命令/工具面，不再要求重启
+- DXT archive 现在会保留 bundled files、校验签名覆盖的 bundle 内容，并在 uninstall / reinstall 时清理已解包内容
+- tmux swarm 启动现在会显式固定 pane 工作目录，并正确沿用自定义 CLI 命令
+- Quick Start 现在提供中英文双版本，并有自动命令 / endpoint 一致性测试兜底
 
 ## 当前推荐阅读顺序
 
