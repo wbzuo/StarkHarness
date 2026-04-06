@@ -1,4 +1,5 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { createHmac } from 'node:crypto';
 import path from 'node:path';
 import { validatePluginManifest } from './loader.js';
 
@@ -121,7 +122,49 @@ function parseZipEntries(buffer) {
   return entries;
 }
 
-export async function packagePluginAsDxt({ manifestPath, outputPath, include = [] } = {}) {
+const SIGNATURE_PREFIX = 'stark-sig:';
+
+function computeManifestSignature(manifestBuffer, secretKey) {
+  return createHmac('sha256', secretKey).update(manifestBuffer).digest('hex');
+}
+
+export function signDxtPackage(archiveBuffer, manifestBuffer, secretKey) {
+  const signature = computeManifestSignature(manifestBuffer, secretKey);
+  const comment = Buffer.from(`${SIGNATURE_PREFIX}${signature}`, 'utf8');
+
+  // Patch EOCD to include ZIP comment with signature
+  const eocdOffset = findEocd(archiveBuffer);
+  if (eocdOffset === -1) throw new Error('invalid-dxt-package:eocd-not-found');
+  const patched = Buffer.alloc(archiveBuffer.length + comment.length);
+  archiveBuffer.copy(patched);
+  // Write comment length at EOCD offset + 20
+  patched.writeUInt16LE(comment.length, eocdOffset + 20);
+  // Append comment after EOCD
+  comment.copy(patched, archiveBuffer.length);
+  return patched;
+}
+
+export function verifyDxtSignature(archiveBuffer, secretKey) {
+  const eocdOffset = findEocd(archiveBuffer);
+  if (eocdOffset === -1) return { valid: false, reason: 'eocd-not-found' };
+  const commentLength = archiveBuffer.readUInt16LE(eocdOffset + 20);
+  if (commentLength === 0) return { valid: false, reason: 'no-signature' };
+  const commentStart = eocdOffset + 22;
+  const comment = archiveBuffer.slice(commentStart, commentStart + commentLength).toString('utf8');
+  if (!comment.startsWith(SIGNATURE_PREFIX)) return { valid: false, reason: 'no-signature-prefix' };
+  const embeddedSig = comment.slice(SIGNATURE_PREFIX.length);
+
+  // Extract plugin.json content from the archive
+  const entries = parseZipEntries(archiveBuffer);
+  const pluginEntry = entries.find((e) => e.name === 'plugin.json');
+  if (!pluginEntry) return { valid: false, reason: 'plugin-json-missing' };
+
+  const expected = computeManifestSignature(pluginEntry.content, secretKey);
+  const valid = embeddedSig === expected;
+  return { valid, reason: valid ? 'ok' : 'signature-mismatch' };
+}
+
+export async function packagePluginAsDxt({ manifestPath, outputPath, include = [], signingKey } = {}) {
   if (!manifestPath) throw new Error('manifestPath is required');
   const manifestContent = await readFile(manifestPath, 'utf8');
   const manifest = JSON.parse(manifestContent);
@@ -155,11 +198,16 @@ export async function packagePluginAsDxt({ manifestPath, outputPath, include = [
   }
 
   const centralDirectory = Buffer.concat(centralParts);
-  const archive = Buffer.concat([
+  let archive = Buffer.concat([
     ...localParts,
     centralDirectory,
     makeEocd(entries.length, centralDirectory.length, localOffset),
   ]);
+
+  const signed = Boolean(signingKey);
+  if (signingKey) {
+    archive = signDxtPackage(archive, entries[0].data, signingKey);
+  }
 
   const target = path.resolve(outputPath ?? path.join(baseDir, `${manifest.name}.dxt`));
   await mkdir(path.dirname(target), { recursive: true });
@@ -169,10 +217,11 @@ export async function packagePluginAsDxt({ manifestPath, outputPath, include = [
     filePath: target,
     entries: entries.map((entry) => entry.name),
     manifest,
+    signed,
   };
 }
 
-export async function validateDxtPackage(input) {
+export async function validateDxtPackage(input, { signingKey } = {}) {
   const filePath = typeof input === 'string' ? input : input?.packagePath ?? input?.filePath;
   const buffer = await readFile(filePath);
   const entries = parseZipEntries(buffer);
@@ -183,10 +232,20 @@ export async function validateDxtPackage(input) {
   }
   const manifest = JSON.parse(pluginEntry.content.toString('utf8'));
   validatePluginManifest(manifest);
+
+  let signature = null;
+  if (signingKey) {
+    signature = verifyDxtSignature(buffer, signingKey);
+    if (!signature.valid) {
+      throw new Error(`invalid-dxt-package:${signature.reason}`);
+    }
+  }
+
   return {
     ok: true,
     manifest,
     entries: entries.map(({ name, size, compressionMethod }) => ({ name, size, compressionMethod })),
+    signature,
   };
 }
 

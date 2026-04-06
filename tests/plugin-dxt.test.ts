@@ -4,7 +4,7 @@ import { createServer } from 'node:http';
 import { mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
-import { packagePluginAsDxt, validateDxtPackage, installDxtPackage } from '../src/plugins/dxt.js';
+import { packagePluginAsDxt, validateDxtPackage, installDxtPackage, signDxtPackage, verifyDxtSignature } from '../src/plugins/dxt.js';
 import { createRuntime } from '../src/kernel/runtime.js';
 import { loadRuntimeEnv } from '../src/config/env.js';
 
@@ -104,4 +104,72 @@ test('plugin-trust and plugin-autoupdate refresh a trusted plugin manifest', asy
   } finally {
     await server.close();
   }
+});
+
+test('packagePluginAsDxt with signingKey produces a signed package', async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'starkharness-dxt-sign-'));
+  const manifestPath = path.join(root, 'plugin.json');
+  await writeFile(manifestPath, JSON.stringify({
+    name: 'signed-pack',
+    version: '1.0.0',
+    capabilities: ['test'],
+  }), 'utf8');
+
+  const packed = await packagePluginAsDxt({ manifestPath, signingKey: 'test-secret-key' });
+  assert.equal(packed.signed, true);
+
+  // Validate with correct key
+  const validated = await validateDxtPackage({ packagePath: packed.filePath }, { signingKey: 'test-secret-key' });
+  assert.equal(validated.ok, true);
+  assert.equal(validated.signature.valid, true);
+  assert.equal(validated.signature.reason, 'ok');
+});
+
+test('validateDxtPackage rejects tampered signature', async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'starkharness-dxt-tamper-'));
+  const manifestPath = path.join(root, 'plugin.json');
+  await writeFile(manifestPath, JSON.stringify({
+    name: 'tamper-pack',
+    version: '1.0.0',
+    capabilities: ['test'],
+  }), 'utf8');
+
+  const packed = await packagePluginAsDxt({ manifestPath, signingKey: 'key-a' });
+  await assert.rejects(
+    () => validateDxtPackage({ packagePath: packed.filePath }, { signingKey: 'key-b' }),
+    (err) => err.message.includes('signature-mismatch'),
+  );
+});
+
+test('validateDxtPackage without signingKey skips verification', async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'starkharness-dxt-nosig-'));
+  const manifestPath = path.join(root, 'plugin.json');
+  await writeFile(manifestPath, JSON.stringify({
+    name: 'nosig-pack',
+    version: '1.0.0',
+    capabilities: ['test'],
+  }), 'utf8');
+
+  const packed = await packagePluginAsDxt({ manifestPath });
+  assert.equal(packed.signed, false);
+
+  const validated = await validateDxtPackage({ packagePath: packed.filePath });
+  assert.equal(validated.ok, true);
+  assert.equal(validated.signature, null);
+});
+
+test('verifyDxtSignature returns no-signature for unsigned packages', async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'starkharness-dxt-unsign-'));
+  const manifestPath = path.join(root, 'plugin.json');
+  await writeFile(manifestPath, JSON.stringify({
+    name: 'unsigned-pack',
+    version: '1.0.0',
+    capabilities: ['test'],
+  }), 'utf8');
+
+  const packed = await packagePluginAsDxt({ manifestPath });
+  const buffer = await readFile(packed.filePath);
+  const result = verifyDxtSignature(buffer, 'any-key');
+  assert.equal(result.valid, false);
+  assert.equal(result.reason, 'no-signature');
 });
