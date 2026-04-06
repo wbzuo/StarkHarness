@@ -32,6 +32,8 @@ import { SkillLoader } from '../skills/loader.js';
 import { matchAndBind } from '../skills/binder.js';
 import { AgentRunner } from './runner.js';
 import { describeWebAccess } from '../web-access/index.js';
+import { createObservabilityManager } from '../enterprise/observability.js';
+import { createFeatureFlagManager } from '../enterprise/growthbook.js';
 
 function createSnapshot(runtime) {
   return {
@@ -86,6 +88,13 @@ export async function createRuntime(options = {}) {
   for (const provider of createProviderBlueprint(providerConfig)) {
     providers.register(provider);
   }
+  function reloadProviders(nextConfig = providers.config) {
+    providers.config = nextConfig;
+    providers.clear();
+    for (const provider of createProviderBlueprint(nextConfig)) {
+      providers.register(provider);
+    }
+  }
   for (const tool of createBuiltinTools()) {
     tools.register(tool);
   }
@@ -98,6 +107,8 @@ export async function createRuntime(options = {}) {
   const cwd = session.cwd ?? process.cwd();
   const context = createContextEnvelope({ cwd, mode: session.mode });
   const webAccess = await describeWebAccess({ cwd, env: envConfig.raw });
+  const observability = createObservabilityManager(envConfig.telemetry);
+  const featureFlags = createFeatureFlagManager(envConfig.telemetry);
 
   // Memory and skills bind to session.cwd (correct for both new and resumed sessions)
   const memory = new MemoryManager({ projectDir: projectDir });
@@ -238,6 +249,8 @@ export async function createRuntime(options = {}) {
     webAccess,
     app: options.app ?? null,
     env: envConfig,
+    observability,
+    featureFlags,
     scheduler,
     executor: null,
     orchestrator: null,
@@ -251,7 +264,25 @@ export async function createRuntime(options = {}) {
       return this.trace;
     },
     async log(eventName, payload) {
-      return this.telemetry.emit(eventName, payload, this.trace);
+      const event = await this.telemetry.emit(eventName, payload, this.trace);
+      await this.observability.report(eventName, payload);
+      return event;
+    },
+    async reloadEnvAndProviders() {
+      const { loadRuntimeEnv } = await import('../config/env.js');
+      const nextEnv = await loadRuntimeEnv({
+        cwd: this.app?.rootDir ?? this.context.cwd,
+        envFilePath: this.app?.paths?.envPath ?? null,
+      });
+      this.env = nextEnv;
+      reloadProviders(mergeProviderConfig(
+        mergeProviderConfig(loadedProviderConfig, nextEnv.providers),
+        options.providerConfig ?? {},
+      ));
+      this.webAccess = await describeWebAccess({ cwd: this.context.cwd, env: nextEnv.raw });
+      this.observability = createObservabilityManager(nextEnv.telemetry);
+      this.featureFlags = createFeatureFlagManager(nextEnv.telemetry);
+      return nextEnv;
     },
     async dispatchTurn(turn, options = {}) {
       await this.log('turn:start', turn);
@@ -292,13 +323,16 @@ export async function createRuntime(options = {}) {
       const effectiveSystemPrompt = binding
         ? `${this.context.systemPrompt}${binding.promptAddendum}`
         : this.context.systemPrompt;
+      const modePrompt = this.session.mode === 'plan'
+        ? `${effectiveSystemPrompt}\n\n# Plan Mode\nYou are in read-only planning mode. Do not edit files or execute mutating work. Produce plans, analysis, and implementation guidance only.`
+        : effectiveSystemPrompt;
       const previousActiveSkill = this.context.activeSkill ?? null;
       this.context.activeSkill = binding?.path
         ? { name: binding.name, dir: binding.path }
         : null;
       const result = await this.runner.run({
         userMessage,
-        systemPrompt: effectiveSystemPrompt,
+        systemPrompt: modePrompt,
         onTextChunk: (chunk) => options.onTextChunk?.(chunk, { traceId: trace.traceId }),
         permissions: options.permissions,
       }).finally(() => {
@@ -337,6 +371,9 @@ export async function createRuntime(options = {}) {
     },
     listWorkers() {
       return this.orchestrator.listWorkers();
+    },
+    async refreshFeatureFlags() {
+      return this.featureFlags.sync();
     },
     async shutdown() {
       const workerIds = this.orchestrator.listWorkers().map((worker) => worker.agentId);
@@ -387,6 +424,8 @@ export function createBlueprintDocument(runtime) {
       },
       telemetry: runtime.env.telemetry,
     } : null,
+    observability: runtime.observability.status(),
+    featureFlags: runtime.featureFlags.getAll(),
     orchestration: {
       taskCount: runtime.tasks.list().length,
       agentCount: runtime.agents.list().length,

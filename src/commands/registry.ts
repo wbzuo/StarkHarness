@@ -4,6 +4,7 @@ import { listSandboxProfiles } from '../permissions/profiles.js';
 import { createReplayPlan, evaluateReplayPlan } from '../replay/runner.js';
 import { getWebAccessStatus } from '../web-access/index.js';
 import { listStarterApps, scaffoldApp } from '../app/scaffold.js';
+import { writeEnvValues, removeEnvKeys } from '../config/env.js';
 
 function filterTranscript(entries, args = {}) {
   let next = entries;
@@ -43,6 +44,51 @@ function createSessionSummary(runtime) {
   };
 }
 
+function createStatusSummary(runtime) {
+  return {
+    app: runtime.app
+      ? {
+        name: runtime.app.name,
+        version: runtime.app.version,
+        startup: runtime.app.startup,
+        automation: runtime.app.automation,
+      }
+      : null,
+    session: createSessionSummary(runtime),
+    providers: runtime.env ? {
+      anthropic: Boolean(runtime.env.providers?.anthropic?.apiKey),
+      openai: Boolean(runtime.env.providers?.openai?.apiKey),
+      compatible: Boolean(runtime.env.providers?.compatible?.apiKey),
+    } : {},
+    features: {
+      webAccess: runtime.env?.features?.webAccess ?? true,
+      remoteControl: runtime.env?.features?.remoteControl ?? true,
+      autoMode: runtime.env?.features?.autoMode ?? false,
+      autoUpdate: runtime.env?.features?.autoUpdate ?? false,
+      debug: runtime.env?.features?.debug ?? false,
+    },
+    webAccess: {
+      available: runtime.webAccess?.available ?? false,
+      ready: runtime.webAccess?.ready ?? false,
+      proxyUrl: runtime.webAccess?.proxyUrl ?? null,
+    },
+    bridge: runtime.env?.bridge ?? {},
+    observability: runtime.observability?.status?.() ?? null,
+    workers: {
+      active: runtime.listWorkers().length,
+      queuedMessages: runtime.inbox.totalCount(),
+      pendingResponses: runtime.inbox.pendingCount?.() ?? 0,
+    },
+    counts: {
+      commands: runtime.commands.list().length,
+      tools: runtime.tools.list().length,
+      agents: runtime.agents.list().length,
+      tasks: runtime.tasks.list().length,
+      plugins: runtime.plugins.list().length,
+    },
+  };
+}
+
 export function createCommandRegistry() {
   return [
     {
@@ -74,6 +120,43 @@ export function createCommandRegistry() {
             features: runtime.env.features,
             bridge: runtime.env.bridge,
           } : null,
+        };
+      },
+    },
+    {
+      name: 'status',
+      description: 'Show a product-style runtime status summary',
+      async execute(runtime) {
+        return createStatusSummary(runtime);
+      },
+    },
+    {
+      name: 'enter-plan-mode',
+      description: 'Switch the session into read-only planning mode',
+      async execute(runtime) {
+        runtime.session.mode = 'plan';
+        runtime.context.mode = 'plan';
+        await runtime.persist();
+        return { ok: true, mode: runtime.session.mode };
+      },
+    },
+    {
+      name: 'exit-plan-mode',
+      description: 'Exit read-only planning mode and return to interactive mode',
+      async execute(runtime) {
+        runtime.session.mode = 'interactive';
+        runtime.context.mode = 'interactive';
+        await runtime.persist();
+        return { ok: true, mode: runtime.session.mode };
+      },
+    },
+    {
+      name: 'plan-status',
+      description: 'Show whether plan mode is currently active',
+      async execute(runtime) {
+        return {
+          enabled: runtime.session.mode === 'plan',
+          mode: runtime.session.mode,
         };
       },
     },
@@ -145,6 +228,103 @@ export function createCommandRegistry() {
             model: runtime.env.providers.compatible.model ?? null,
           },
         } : null;
+      },
+    },
+    {
+      name: 'login',
+      description: 'Persist provider credentials/config into the app or workspace env file and reload runtime providers',
+      async execute(runtime, args = {}) {
+        const provider = args.provider ?? 'openai';
+        const keyMap = {
+          anthropic: {
+            apiKey: 'ANTHROPIC_API_KEY',
+            baseUrl: 'ANTHROPIC_BASE_URL',
+            model: 'ANTHROPIC_MODEL',
+          },
+          openai: {
+            apiKey: 'OPENAI_API_KEY',
+            baseUrl: 'OPENAI_BASE_URL',
+            model: 'OPENAI_MODEL',
+          },
+          compatible: {
+            apiKey: 'COMPATIBLE_API_KEY',
+            baseUrl: 'COMPATIBLE_BASE_URL',
+            model: 'COMPATIBLE_MODEL',
+          },
+        }[provider];
+        if (!keyMap) {
+          throw new Error(`Unsupported provider for login: ${provider}`);
+        }
+        const filePath = await writeEnvValues({
+          cwd: runtime.app?.rootDir ?? runtime.context.cwd,
+          envFilePath: runtime.app?.paths?.envPath ?? null,
+          values: {
+            ...(args.apiKey ? { [keyMap.apiKey]: args.apiKey } : {}),
+            ...(args.baseUrl ? { [keyMap.baseUrl]: args.baseUrl } : {}),
+            ...(args.model ? { [keyMap.model]: args.model } : {}),
+          },
+        });
+        await runtime.reloadEnvAndProviders();
+        return {
+          ok: true,
+          provider,
+          filePath,
+          status: await runtime.dispatchCommand('login-status'),
+        };
+      },
+    },
+    {
+      name: 'logout',
+      description: 'Remove provider credentials/config from the app or workspace env file and reload runtime providers',
+      async execute(runtime, args = {}) {
+        const provider = args.provider ?? 'openai';
+        const keyMap = {
+          anthropic: ['ANTHROPIC_API_KEY', 'ANTHROPIC_BASE_URL', 'ANTHROPIC_MODEL'],
+          openai: ['OPENAI_API_KEY', 'OPENAI_BASE_URL', 'OPENAI_MODEL'],
+          compatible: ['COMPATIBLE_API_KEY', 'COMPATIBLE_BASE_URL', 'COMPATIBLE_MODEL'],
+        }[provider];
+        if (!keyMap) {
+          throw new Error(`Unsupported provider for logout: ${provider}`);
+        }
+        const filePath = await removeEnvKeys({
+          cwd: runtime.app?.rootDir ?? runtime.context.cwd,
+          envFilePath: runtime.app?.paths?.envPath ?? null,
+          keys: keyMap,
+        });
+        await runtime.reloadEnvAndProviders();
+        return {
+          ok: true,
+          provider,
+          filePath,
+          status: await runtime.dispatchCommand('login-status'),
+        };
+      },
+    },
+    {
+      name: 'observability-status',
+      description: 'Show enterprise observability integration status',
+      async execute(runtime) {
+        return {
+          observability: runtime.observability?.status?.() ?? null,
+          telemetry: runtime.env?.telemetry ?? null,
+        };
+      },
+    },
+    {
+      name: 'feature-flags',
+      description: 'Show the current merged feature flags from env and remote config',
+      async execute(runtime) {
+        return runtime.featureFlags?.getAll?.() ?? {};
+      },
+    },
+    {
+      name: 'growthbook-sync',
+      description: 'Refresh remote feature flags from a configured GrowthBook endpoint',
+      async execute(runtime) {
+        return {
+          flags: await runtime.refreshFeatureFlags(),
+          status: runtime.featureFlags?.status?.() ?? null,
+        };
       },
     },
     {
@@ -392,6 +572,13 @@ export function createCommandRegistry() {
           eventNames: [...new Set(events.map((entry) => entry.eventName))],
           lastEvent: events.at(-1) ?? null,
         };
+      },
+    },
+    {
+      name: 'todos',
+      description: 'List persisted user-facing todos for the current workspace',
+      async execute(runtime) {
+        return runtime.state.loadTodos();
       },
     },
     {

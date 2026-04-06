@@ -123,7 +123,7 @@ test('AgentRunner respects PreToolUse hook deny', async () => {
   const provider = makeMockProvider([
     {
       text: '',
-      toolCalls: [{ id: 'tu_1', name: 'shell', input: { command: 'rm -rf /' } }],
+      toolCalls: [{ id: 'tu_1', name: 'shell', input: { command: 'echo dangerous-looking but allowed' } }],
       stopReason: 'tool_use',
       usage: {},
     },
@@ -266,4 +266,58 @@ test('AgentRunner returns unknown-tool for unregistered tools', async () => {
   assert.equal(result.turns.length, 1);
   assert.equal(result.turns[0].result.ok, false);
   assert.equal(result.turns[0].result.reason, 'unknown-tool');
+});
+
+test('AgentRunner uses LLM-based compact summaries when context grows large', async () => {
+  let callIndex = 0;
+  const provider = {
+    async complete() {
+      callIndex += 1;
+      if (callIndex === 1) {
+        return {
+          text: 'First long answer '.repeat(20),
+          toolCalls: [{ id: 'tu_1', name: 'read_file', input: { path: 'a.txt' } }],
+          stopReason: 'tool_use',
+          usage: {},
+        };
+      }
+      if (callIndex === 2) {
+        return {
+          text: 'Second long answer '.repeat(20),
+          toolCalls: [{ id: 'tu_2', name: 'read_file', input: { path: 'b.txt' } }],
+          stopReason: 'tool_use',
+          usage: {},
+        };
+      }
+      if (callIndex === 3) {
+        return {
+          text: 'LLM summary of earlier conversation',
+          toolCalls: [],
+          stopReason: 'end_turn',
+          usage: {},
+        };
+      }
+      return {
+        text: 'Final answer after compaction.',
+        toolCalls: [],
+        stopReason: 'end_turn',
+        usage: {},
+      };
+    },
+  };
+  const hooks = new HookDispatcher();
+  const tools = new ToolRegistry();
+  tools.register(makeTestTool('read_file', { content: 'data' }));
+  const permissions = new PermissionEngine({ read: 'allow' });
+
+  const runner = new AgentRunner({ provider, hooks, tools, permissions });
+  const result = await runner.run({
+    userMessage: 'Read several files and continue',
+    systemPrompt: 'You are helpful.',
+    compactThreshold: 20,
+  });
+
+  assert.equal(result.compactions, 1);
+  assert.equal(result.finalText, 'Final answer after compaction.');
+  assert.ok(result.messages.some((message) => typeof message.content === 'string' && message.content.includes('LLM summary of earlier conversation')));
 });

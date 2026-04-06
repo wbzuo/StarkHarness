@@ -206,6 +206,11 @@ test('HTTP bridge exposes app and blueprint endpoints', async () => {
 test('HTTP bridge exposes env and web-access endpoints', async () => {
   const ctx = await makeBridge();
   try {
+    const statusRes = await fetch(`${ctx.bridge.url}/status`);
+    const status = await statusRes.json();
+    assert.equal(typeof status.counts.commands, 'number');
+    assert.equal(typeof status.webAccess.available, 'boolean');
+
     const envRes = await fetch(`${ctx.bridge.url}/env`);
     const envBody = await envRes.json();
     assert.ok(envBody.features);

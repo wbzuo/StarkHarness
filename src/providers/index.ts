@@ -23,6 +23,10 @@ export class ProviderRegistry {
     return this.#providers.get(id);
   }
 
+  clear() {
+    this.#providers.clear();
+  }
+
   list() {
     return [...this.#providers.values()].map(({ id, purpose, modelFamily, capabilities }) => ({
       id,

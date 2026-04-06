@@ -267,6 +267,7 @@ export async function createHttpBridge(runtime, { port = 3000, host = '127.0.0.1
         if (path === '/session') return json(res, runtime.session);
         if (path === '/providers') return json(res, runtime.providers.list());
         if (path === '/tools') return json(res, runtime.tools.list().map(({ name, capability, description }) => ({ name, capability, description })));
+        if (path === '/status') return json(res, await runtime.dispatchCommand('status', { permissions }));
         if (path === '/app') return json(res, runtime.app ?? null);
         if (path === '/doctor') return json(res, await runtime.dispatchCommand('doctor', { permissions }));
         if (path === '/registry') return json(res, await runtime.dispatchCommand('registry', { permissions }));

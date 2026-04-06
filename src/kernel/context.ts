@@ -25,7 +25,7 @@ export function estimateTokens(messages) {
   return total;
 }
 
-function summarizeMessages(messages) {
+export function summarizeMessages(messages) {
   const toolCalls = messages.filter((m) =>
     Array.isArray(m.content) && m.content.some?.((b) => b.type === 'tool_use'),
   );
@@ -43,14 +43,14 @@ function summarizeMessages(messages) {
   ].filter(Boolean).join('\n');
 }
 
-export function compactMessages(messages, { maxTokens = 80000, keepRecent = 6 } = {}) {
+export function compactMessages(messages, { maxTokens = 80000, keepRecent = 6, summaryOverride = null } = {}) {
   const estimate = estimateTokens(messages);
   if (estimate < maxTokens) return { compacted: false, messages, removed: 0, estimatedTokens: estimate };
 
   const keep = Math.max(keepRecent, Math.floor(messages.length * 0.25));
   const removed = messages.slice(0, -keep);
   const kept = messages.slice(-keep);
-  const summary = summarizeMessages(removed);
+  const summary = summaryOverride ?? summarizeMessages(removed);
 
   const compactedMessages = [
     { role: 'user', content: summary },
