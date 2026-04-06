@@ -5,6 +5,12 @@ import { createReplayPlan, evaluateReplayPlan } from '../replay/runner.js';
 import { getWebAccessStatus } from '../web-access/index.js';
 import { listStarterApps, scaffoldApp } from '../app/scaffold.js';
 import { writeEnvValues, removeEnvKeys } from '../config/env.js';
+import { mkdir } from 'node:fs/promises';
+import path from 'node:path';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
+
+const execFileAsync = promisify(execFile);
 
 function filterTranscript(entries, args = {}) {
   let next = entries;
@@ -128,6 +134,36 @@ export function createCommandRegistry() {
       description: 'Show a product-style runtime status summary',
       async execute(runtime) {
         return createStatusSummary(runtime);
+      },
+    },
+    {
+      name: 'enter-coordinator-mode',
+      description: 'Switch the session into coordinator mode for delegation-first orchestration',
+      async execute(runtime) {
+        runtime.session.mode = 'coordinator';
+        runtime.context.mode = 'coordinator';
+        await runtime.persist();
+        return { ok: true, mode: runtime.session.mode };
+      },
+    },
+    {
+      name: 'exit-coordinator-mode',
+      description: 'Exit coordinator mode and return to interactive mode',
+      async execute(runtime) {
+        runtime.session.mode = 'interactive';
+        runtime.context.mode = 'interactive';
+        await runtime.persist();
+        return { ok: true, mode: runtime.session.mode };
+      },
+    },
+    {
+      name: 'coordinator-status',
+      description: 'Show whether coordinator mode is active',
+      async execute(runtime) {
+        return {
+          enabled: runtime.session.mode === 'coordinator',
+          mode: runtime.session.mode,
+        };
       },
     },
     {
@@ -462,6 +498,14 @@ export function createCommandRegistry() {
       },
     },
     {
+      name: 'agent-summary',
+      description: 'Show the persisted summary for an agent',
+      async execute(runtime, args = {}) {
+        const state = await runtime.state.loadAgentState(args.agent ?? args.id ?? 'agent-1');
+        return state?.lastSummary ?? null;
+      },
+    },
+    {
       name: 'plugins',
       description: 'List registered plugins and capabilities',
       async execute(runtime) {
@@ -479,6 +523,36 @@ export function createCommandRegistry() {
       description: 'List available sandbox profiles',
       async execute() {
         return listSandboxProfiles();
+      },
+    },
+    {
+      name: 'enter-worktree',
+      description: 'Create or switch into a git worktree for the current repository',
+      async execute(runtime, args = {}) {
+        const branch = args.branch ?? 'starkharness-worktree';
+        const worktreeRoot = path.join(runtime.state.rootDir, 'worktrees');
+        const worktreePath = path.join(worktreeRoot, branch);
+        await mkdir(worktreeRoot, { recursive: true });
+        await execFileAsync('git', ['worktree', 'add', '-B', branch, worktreePath], {
+          cwd: runtime.context.cwd,
+        });
+        runtime.session.worktreeParentCwd = runtime.context.cwd;
+        runtime.session.cwd = worktreePath;
+        runtime.context.cwd = worktreePath;
+        await runtime.persist();
+        return { ok: true, branch, worktreePath };
+      },
+    },
+    {
+      name: 'exit-worktree',
+      description: 'Return to the original project root from a temporary worktree session',
+      async execute(runtime) {
+        const target = runtime.session.worktreeParentCwd ?? runtime.app?.rootDir ?? process.cwd();
+        runtime.session.cwd = target;
+        runtime.context.cwd = target;
+        runtime.session.worktreeParentCwd = null;
+        await runtime.persist();
+        return { ok: true, cwd: target };
       },
     },
     {

@@ -1,7 +1,7 @@
 export function createWorkspaceBlueprint() {
   return {
     git: 'planned',
-    worktree: 'planned',
+    worktree: 'ready',
     review: 'planned',
     branch: 'planned',
     app: 'ready',

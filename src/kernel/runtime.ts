@@ -325,7 +325,9 @@ export async function createRuntime(options = {}) {
         : this.context.systemPrompt;
       const modePrompt = this.session.mode === 'plan'
         ? `${effectiveSystemPrompt}\n\n# Plan Mode\nYou are in read-only planning mode. Do not edit files or execute mutating work. Produce plans, analysis, and implementation guidance only.`
-        : effectiveSystemPrompt;
+        : this.session.mode === 'coordinator'
+          ? `${effectiveSystemPrompt}\n\n# Coordinator Mode\nYou are in coordinator mode. Prefer delegating work, coordinating agents, and synthesizing results over directly performing implementation work yourself.`
+          : effectiveSystemPrompt;
       const previousActiveSkill = this.context.activeSkill ?? null;
       this.context.activeSkill = binding?.path
         ? { name: binding.name, dir: binding.path }

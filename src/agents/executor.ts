@@ -3,6 +3,7 @@ import { AgentRunner } from '../kernel/runner.js';
 import { createContextEnvelope } from '../kernel/context.js';
 import { createBuiltinTools } from '../tools/builtins/index.js';
 import { createExecutionProvider } from '../runtime/sandbox.js';
+import { summarizeAgentResult } from './summary.js';
 
 function buildToolRegistry(runtime, agent) {
   const registry = new ToolRegistry();
@@ -86,6 +87,7 @@ export class AgentExecutor {
       handledMessages: Number(previous.handledMessages ?? 0) + (execution.kind === 'message' ? 1 : 0),
       lastExecution: execution,
       lastResult: result.finalText ?? '',
+      lastSummary: summarizeAgentResult({ agent, execution, result }),
       usage: {
         inputTokens: Number(prevUsage.inputTokens ?? 0) + curInputTokens,
         outputTokens: Number(prevUsage.outputTokens ?? 0) + curOutputTokens,
