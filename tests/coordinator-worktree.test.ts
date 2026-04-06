@@ -20,17 +20,20 @@ test('coordinator mode toggles and affects runtime prompting', async () => {
   const status = await runtime.dispatchCommand('coordinator-status');
   assert.equal(status.enabled, true);
 
-  runtime.runner.run = async ({ systemPrompt }) => ({
-    finalText: 'coordinated',
-    turns: [],
-    messages: [],
-    stopReason: 'end_turn',
-    usage: {},
-    _systemPrompt: systemPrompt,
-  });
+  const capturedToolCalls = [];
+  runtime.providers.completeWithStrategy = async ({ request }) => {
+    capturedToolCalls.push((request.tools ?? []).map((tool) => tool.name).sort());
+    return {
+      text: 'coordinated',
+      toolCalls: [],
+      stopReason: 'end_turn',
+      usage: {},
+    };
+  };
 
   const result = await runtime.run('Coordinate this task');
-  assert.match(result._systemPrompt, /Coordinator Mode/);
+  assert.match(result.finalText, /coordinated/);
+  assert.ok(capturedToolCalls.some((call) => JSON.stringify(call) === JSON.stringify(['send_message', 'spawn_agent', 'tasks'])));
 
   await runtime.dispatchCommand('exit-coordinator-mode');
   const after = await runtime.dispatchCommand('coordinator-status');
@@ -45,16 +48,31 @@ test('agent summaries are persisted after agent execution', async () => {
     session: { cwd: root, goal: 'agent-summary' },
   });
   const agent = runtime.agents.spawn({ id: 'agent-1', role: 'reviewer', description: 'summarize work' });
-  runtime.providers.completeWithStrategy = async () => ({
-    text: 'Finished the review and highlighted the main issues.',
-    toolCalls: [],
-    stopReason: 'end_turn',
-    usage: {},
-  });
+  runtime.providers.completeWithStrategy = async ({ request }) => {
+    if (request.systemPrompt?.includes('Summarize the agent result')) {
+      return {
+        text: JSON.stringify({
+          headline: 'LLM summary headline',
+          outcome: 'Highlighted the main issues.',
+        }),
+        toolCalls: [],
+        stopReason: 'end_turn',
+        usage: {},
+      };
+    }
+    return {
+      text: 'Finished the review and highlighted the main issues.',
+      toolCalls: [],
+      stopReason: 'end_turn',
+      usage: {},
+    };
+  };
 
   await runtime.executor.execute(agent, { id: 'task-1', subject: 'review api', description: 'review the API surface' });
   const summary = await runtime.dispatchCommand('agent-summary', { agent: 'agent-1' });
-  assert.match(summary.headline, /Finished the review/);
+  assert.equal(summary.headline, 'LLM summary headline');
+  assert.equal(summary.outcome, 'Highlighted the main issues.');
+  assert.equal(summary.strategy, 'llm');
   assert.equal(summary.executionKind, 'task');
   await runtime.shutdown();
 });

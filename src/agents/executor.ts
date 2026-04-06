@@ -80,6 +80,19 @@ export class AgentExecutor {
     // Normalize snake_case (from runner) and camelCase usage keys
     const curInputTokens = Number(raw.inputTokens ?? raw.input_tokens ?? 0);
     const curOutputTokens = Number(raw.outputTokens ?? raw.output_tokens ?? 0);
+    const summary = await summarizeAgentResult({
+      agent,
+      execution,
+      result,
+      provider: {
+        complete: ({ systemPrompt, messages, tools }) =>
+          this.runtime.providers.completeWithStrategy({
+            capability: 'chat',
+            request: { systemPrompt, messages, tools },
+            retryOptions: { maxRetries: 1, baseDelay: 50, timeout: 30000 },
+          }),
+      },
+    });
     const nextState = {
       agentId: agent.id,
       runs: Number(previous.runs ?? 0) + 1,
@@ -87,7 +100,7 @@ export class AgentExecutor {
       handledMessages: Number(previous.handledMessages ?? 0) + (execution.kind === 'message' ? 1 : 0),
       lastExecution: execution,
       lastResult: result.finalText ?? '',
-      lastSummary: summarizeAgentResult({ agent, execution, result }),
+      lastSummary: summary,
       usage: {
         inputTokens: Number(prevUsage.inputTokens ?? 0) + curInputTokens,
         outputTokens: Number(prevUsage.outputTokens ?? 0) + curOutputTokens,

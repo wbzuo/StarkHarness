@@ -36,6 +36,12 @@ import { describeVoice } from '../voice/index.js';
 import { createObservabilityManager } from '../enterprise/observability.js';
 import { createFeatureFlagManager } from '../enterprise/growthbook.js';
 
+const COORDINATOR_ALLOWED_TOOLS = new Set([
+  'spawn_agent',
+  'send_message',
+  'tasks',
+]);
+
 function createSnapshot(runtime) {
   return {
     session: runtime.session,
@@ -364,9 +370,37 @@ export async function createRuntime(options = {}) {
       this.context.activeSkill = binding?.path
         ? { name: binding.name, dir: binding.path }
         : null;
-      const result = await this.runner.run({
+      const scopedTools = this.session.mode === 'coordinator'
+        ? (() => {
+          const registry = new ToolRegistry();
+          registry.registerMany(this.tools.list().filter((tool) => COORDINATOR_ALLOWED_TOOLS.has(tool.name)));
+          return registry;
+        })()
+        : this.tools;
+      const scopedRunner = this.session.mode === 'coordinator'
+        ? (() => {
+          const runner = new AgentRunner({
+            provider: {
+              async complete({ systemPrompt, messages, tools, onTextChunk }) {
+                return providers.completeWithStrategy({
+                  capability: 'chat',
+                  request: { systemPrompt, messages, tools, onTextChunk },
+                  retryOptions: { maxRetries: 2, baseDelay: 50, timeout: 120000 },
+                });
+              },
+            },
+            hooks: hooks.fork(),
+            tools: scopedTools,
+            permissions: options.permissions ?? this.permissions,
+          });
+          runner.setRuntime(this);
+          return runner;
+        })()
+        : this.runner;
+      const result = await scopedRunner.run({
         userMessage,
         systemPrompt: modePrompt,
+        toolSchemas: scopedTools.toSchemaList(),
         onTextChunk: (chunk) => options.onTextChunk?.(chunk, { traceId: trace.traceId }),
         permissions: options.permissions,
       }).finally(() => {

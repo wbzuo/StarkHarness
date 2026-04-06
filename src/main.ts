@@ -4,6 +4,7 @@ import { createRuntime } from './kernel/runtime.js';
 import { loadAppManifest } from './app/manifest.js';
 import { listStarterApps, scaffoldApp } from './app/scaffold.js';
 import { loadRuntimeEnv } from './config/env.js';
+import { createInteractivePromptSession } from './ui/prompts.js';
 
 function parseCommandArgs(argv) {
   const parsed = {};
@@ -66,6 +67,11 @@ async function main(argv = process.argv.slice(2)) {
     commandDirs: app?.paths?.commandsDir ? [path.join(app.rootDir, '.starkharness', 'commands'), app.paths.commandsDir] : undefined,
     hookDirs: app?.paths?.hooksDir ? [path.join(app.rootDir, '.starkharness', 'hooks'), app.paths.hooksDir] : undefined,
   });
+  const promptSession = process.stdin.isTTY
+    && process.stdout.isTTY
+    && !['repl', 'chat', 'serve', 'dev', 'pipe'].includes(command)
+    ? createInteractivePromptSession(runtime)
+    : null;
 
   // Interactive REPL mode
   if (command === 'repl' || command === 'chat') {
@@ -136,6 +142,7 @@ async function main(argv = process.argv.slice(2)) {
     console.error(error instanceof Error ? error.message : String(error));
     process.exitCode = 1;
   } finally {
+    promptSession?.close();
     await finalizeCli(runtime, process.exitCode ?? 0);
   }
 }

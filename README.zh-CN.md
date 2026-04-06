@@ -202,7 +202,7 @@ MCP tools 并不是一个单独硬编码的 builtin，而是以 `mcp__server__to
 | `dream` | **记忆整理**: 从当前 transcript 中提取更持久的 memory。 |
 | `session-transcript` | **会话转录**: 读取 session 持久化下来的 JSONL 对话流。 |
 | `enter-plan-mode` / `exit-plan-mode` / `plan-status` | **Plan Mode**: 切换到只读规划姿态。 |
-| `enter-coordinator-mode` / `exit-coordinator-mode` / `coordinator-status` | **Coordinator Mode**: 切换到委派优先的编排模式。 |
+| `enter-coordinator-mode` / `exit-coordinator-mode` / `coordinator-status` | **Coordinator Mode**: 切换到委派优先模式，并把工具面限制为 `spawn_agent`、`send_message`、`tasks`。 |
 | `swarm-start` / `swarm-status` | **Swarm 执行**: 启动一个受限的多 Agent swarm 并查看状态。 |
 | `cron-list` / `cron-create` / `cron-delete` | **计划任务**: 持久化轻量 cron 风格计划定义。 |
 | `auto` | **Auto Mode**: 直接运行 app automation 默认 prompt 或 command。 |
@@ -342,6 +342,7 @@ starter/
 
 - **已经比较扎实**: runtime 装配、多轮执行、mailbox 驱动的多 Agent 编排、bridge authz、持久化、telemetry 与 replay 诊断。
 - **当前活跃线已经产品化可见**: app scaffold/manifest、OAuth profiles、session transcript、本地 docs page、插件市场基础能力、voice 转写、以及 swarm 便捷命令。
+- **默认更安全**: 交互式权限审批现在不仅在 REPL 可用，普通交互式 CLI 也会触发；coordinator mode 现在有真实工具限制；agent summary 也会优先尝试 LLM 摘要。
 - **部分实现**: 超出当前浏览器原语层的更高阶 Web 策略、超出 tool loading 的 MCP 能力、Docker 隔离路径、更成熟的 remote session，以及路线图中更丰富的 TUI。
 - **企业基础能力已具备**: observability hooks、自定义 Sentry、GrowthBook 兼容远程 flags，以及远程控制诊断已经有第一阶段实现。
 - **仍偏早期**: 包版本仍是 `0.1.0`，`package.json` 依然是 `private`，仓库根目录也还没有真正的 `LICENSE` 文件。

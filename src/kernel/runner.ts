@@ -167,7 +167,12 @@ export class AgentRunner {
         tools: [],
       });
       summary = response.text?.trim() ?? '';
-    } catch {}
+    } catch (error) {
+      await this._runtime?.log?.('context:compact:error', {
+        error: error instanceof Error ? error.message : String(error),
+        removedMessages: removed.length,
+      });
+    }
 
     const fallback = summarizeMessages(removed);
     const result = compactMessages(messages, {

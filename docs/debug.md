@@ -8,8 +8,12 @@ Debugging StarkHarness is currently centered around a few key surfaces.
 - `registry`
 - `env-status`
 - `login-status`
+- `oauth-status`
+- `status`
+- `voice-status`
 - `web-access-status`
 - `transcript`
+- `session-transcript`
 - `playback`
 - `traces`
 
@@ -29,9 +33,11 @@ State is written under `.starkharness/`:
 When bridge mode is running, `/docs` provides a live docs and runtime control surface. It reads:
 
 - health
+- status
 - app
 - env
 - web-access
+- voice
 - blueprint
 - providers
 - live prompt execution
@@ -41,7 +47,8 @@ When bridge mode is running, `/docs` provides a live docs and runtime control su
 1. `doctor`
 2. `env-status`
 3. `login-status`
-4. `web-access-status`
-5. `registry`
+4. `status`
+5. `web-access-status`
+6. `registry`
 
 That sequence usually tells you whether the issue is config, provider readiness, bridge state, or runtime wiring.

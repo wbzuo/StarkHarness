@@ -202,7 +202,7 @@ Execute commands via `node --import tsx src/main.ts <command>`.
 | `dream` | **Memory Consolidation**: Extract durable memory from the current transcript. |
 | `session-transcript` | **Transcript Storage**: Load the persisted JSONL conversation log for a session. |
 | `enter-plan-mode` / `exit-plan-mode` / `plan-status` | **Plan Mode**: Toggle a read-only planning posture. |
-| `enter-coordinator-mode` / `exit-coordinator-mode` / `coordinator-status` | **Coordinator Mode**: Switch into delegation-first orchestration. |
+| `enter-coordinator-mode` / `exit-coordinator-mode` / `coordinator-status` | **Coordinator Mode**: Switch into delegation-first orchestration with a restricted tool surface (`spawn_agent`, `send_message`, `tasks`). |
 | `swarm-start` / `swarm-status` | **Swarm Execution**: Launch a scoped multi-agent swarm and inspect it. |
 | `cron-list` / `cron-create` / `cron-delete` | **Schedules**: Persist lightweight cron-style automation entries. |
 | `auto` | **Auto Mode**: Run the app automation default prompt or command without hand-written CLI choreography. |
@@ -342,6 +342,7 @@ starter/
 
 - **Already solid**: runtime assembly, multi-turn execution, mailbox-driven multi-agent orchestration, bridge authz, persistence, telemetry, and replay-oriented diagnostics.
 - **Already product-visible on the active line**: app scaffold/manifest, OAuth profiles, session transcripts, local docs pages, plugin marketplace basics, voice transcription, and swarm convenience commands.
+- **Safer by default**: interactive permission approval now exists in REPL and normal interactive CLI flows, coordinator mode now applies a real tool restriction, and agent summaries prefer an LLM summary before falling back.
 - **Partially implemented**: MCP beyond tool loading, higher-level web strategy beyond the current browser primitives, Docker isolation, richer remote session coordination, and the fuller TUI described in the roadmap.
 - **Enterprise baseline available**: observability hooks, custom Sentry, GrowthBook-compatible remote flags, and remote-control diagnostics now exist as first-pass integrations.
 - **Still early**: the package is `0.1.0`, remains `private`, and the repository does not yet ship a root `LICENSE` file.

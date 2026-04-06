@@ -78,6 +78,9 @@
 - swarm 便捷命令：
   - `swarm-start`
   - `swarm-status`
+- 普通交互式 CLI 也具备权限审批提示，不再只局限于 REPL
+- coordinator mode 现在会真正限制工具面，而不是只靠 system prompt 提示
+- agent summary 现在优先尝试 LLM 摘要，失败时才回退到文本截断
 
 ## 当前推荐阅读顺序
 

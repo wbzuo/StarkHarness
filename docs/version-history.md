@@ -78,6 +78,9 @@ The active line now includes all earlier milestones plus:
 - swarm convenience commands:
   - `swarm-start`
   - `swarm-status`
+- interactive permission prompts for normal interactive CLI flows, not just REPL
+- coordinator mode now enforces a restricted tool surface instead of relying only on prompt wording
+- agent summaries now prefer an LLM summary and fall back to text truncation only when needed
 
 ## Current Reading Guide
 

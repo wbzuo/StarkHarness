@@ -1,6 +1,7 @@
 import readline from 'node:readline/promises';
 import { stdin as input, stdout as output } from 'node:process';
 import { tokenizeForStreaming } from '../utils/text.js';
+import { attachInteractivePrompts } from './prompts.js';
 
 export { tokenizeForStreaming } from '../utils/text.js';
 
@@ -29,22 +30,8 @@ export async function startRepl(runtime, { json = false, outputStream = output }
   const transcript = [];
   const prompt = json ? '' : 'stark> ';
 
-  if (!runtime.requestPermission && !json) {
-    runtime.requestPermission = async ({ toolName, capability, toolInput, gate }) => {
-      const summary = toolName === 'shell'
-        ? (toolInput?.command ?? '')
-        : (toolInput?.path ?? toolInput?.file ?? JSON.stringify(toolInput ?? {}));
-      const answer = (await rl.question(`Permission required for ${toolName} (${capability})\nReason: ${gate.reason ?? gate.source ?? 'policy'}\nInput: ${summary}\nAllow? [y/N] `)).trim().toLowerCase();
-      return answer === 'y' || answer === 'yes';
-    };
-  }
-
-  if (!runtime.askUserQuestion && !json) {
-    runtime.askUserQuestion = async ({ question, choices = [] }) => {
-      const hint = choices.length > 0 ? `\nChoices: ${choices.join(', ')}` : '';
-      const answer = await rl.question(`${question}${hint}\n> `);
-      return answer.trim();
-    };
+  if (!json) {
+    attachInteractivePrompts(runtime, rl);
   }
 
   function emit(line, result, error = null) {
