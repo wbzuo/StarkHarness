@@ -37,6 +37,7 @@ export class PluginLoader {
       commands: [...(manifest.commands ?? [])],
       tools: [...(manifest.tools ?? [])],
     };
+    this.#plugins = this.#plugins.filter((plugin) => plugin.name !== normalized.name);
     this.#plugins.push(normalized);
     return normalized;
   }

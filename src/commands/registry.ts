@@ -82,6 +82,7 @@ function createStatusSummary(runtime) {
       autoUpdate: runtime.env?.features?.autoUpdate ?? false,
       debug: runtime.env?.features?.debug ?? false,
       voice: runtime.env?.features?.voice ?? true,
+      autoDream: runtime.env?.features?.autoDream ?? false,
     },
     webAccess: {
       available: runtime.webAccess?.available ?? false,
@@ -1025,11 +1026,25 @@ export function createCommandRegistry() {
             if (!response.ok) continue;
             const buffer = Buffer.from(await response.arrayBuffer());
             await writeFile(target, buffer);
-            updates.push(await runtime.dispatchCommand('plugin-install', { dxt: target }));
+            const installed = await runtime.dispatchCommand('plugin-install', { dxt: target });
+            updates.push({
+              plugin: plugin.name,
+              name: plugin.name,
+              from: plugin.version ?? null,
+              to: remote.version,
+              installed,
+            });
             continue;
           }
           if (remote.manifestUrl) {
-            updates.push(await runtime.dispatchCommand('plugin-install', { url: remote.manifestUrl }));
+            const installed = await runtime.dispatchCommand('plugin-install', { url: remote.manifestUrl });
+            updates.push({
+              plugin: plugin.name,
+              name: plugin.name,
+              from: plugin.version ?? null,
+              to: remote.version,
+              installed,
+            });
           }
         }
         return {
@@ -1174,13 +1189,6 @@ export function createCommandRegistry() {
       },
     },
     {
-      name: 'tui',
-      description: 'Start the dependency-free terminal dashboard',
-      async execute(runtime) {
-        return startTui(runtime);
-      },
-    },
-    {
       name: 'workers',
       description: 'List active agent inbox workers',
       async execute(runtime) {
@@ -1314,14 +1322,18 @@ export function createCommandRegistry() {
     {
       name: 'dream-status',
       description: 'Show dream/cron background consolidation status',
-      async execute(runtime) {
+      async execute(runtime, args = {}) {
         const crons = await runtime.state.loadCrons();
+        const entries = crons.filter((entry) => (entry.kind ?? '') === 'dream' || (entry.command ?? '') === 'dream');
+        const id = args.id ?? 'dream-background';
         return {
           enabled: runtime.env?.features?.autoDream ?? false,
           schedule: runtime.env?.dream?.schedule ?? null,
           pollIntervalMs: runtime.env?.dream?.pollIntervalMs ?? null,
           background: runtime.backgroundTimer != null,
-          entries: crons.filter((entry) => (entry.kind ?? '') === 'dream' || (entry.command ?? '') === 'dream'),
+          automation: runtime.backgroundTimer ? 'active' : 'idle',
+          entries,
+          entry: entries.find((entry) => entry.id === id) ?? entries.find((entry) => entry.id === 'dream-auto') ?? null,
         };
       },
     },
@@ -1397,18 +1409,7 @@ export function createCommandRegistry() {
         return next.find((entry) => entry.id === id) ?? null;
       },
     },
-    {
-      name: 'dream-status',
-      description: 'Show background dream scheduling status',
-      async execute(runtime, args = {}) {
-        const entries = await runtime.state.loadCrons();
-        const id = args.id ?? 'dream-background';
-        return {
-          automation: runtime.backgroundTimer ? 'active' : 'idle',
-          entry: entries.find((entry) => entry.id === id) ?? null,
-        };
-      },
-    },
+    
     {
       name: 'auto',
       description: 'Run app-aware auto mode using a prompt, stdin, or app automation defaults',

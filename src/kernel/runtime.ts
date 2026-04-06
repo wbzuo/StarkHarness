@@ -643,7 +643,7 @@ export async function createRuntime(options = {}) {
   loop.setRuntime(runtime);
   runner.setRuntime(runtime);
   if (runtime.env?.bridge?.remoteBridgeUrl) {
-    runtime.startRemoteBridge();
+    await runtime.startRemoteBridge();
   }
   runtime.startBackgroundJobs();
   await runtime.persist();

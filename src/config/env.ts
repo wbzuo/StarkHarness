@@ -134,6 +134,11 @@ export async function loadRuntimeEnv({ cwd = process.cwd(), envFilePath = null, 
       managedToken: raw.STARKHARNESS_MANAGED_SETTINGS_TOKEN ?? null,
       autoSync: parseBoolean(raw.STARKHARNESS_MANAGED_SETTINGS_AUTO_SYNC, false),
     },
+    automation: {
+      autoDream: parseBoolean(raw.STARKHARNESS_AUTO_DREAM, false),
+      dreamSchedule: raw.STARKHARNESS_DREAM_SCHEDULE ?? '@every:15m',
+      cronIntervalMs: parseNumber(raw.STARKHARNESS_CRON_INTERVAL_MS, 1000),
+    },
   };
 }
 

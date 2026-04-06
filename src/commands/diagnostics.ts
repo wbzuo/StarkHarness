@@ -23,6 +23,9 @@ export function buildDiagnostics(runtime) {
     } : null,
     observability: runtime.observability?.status?.() ?? null,
     featureFlags: runtime.featureFlags?.getAll?.() ?? {},
+    fileCache: runtime.fileCache?.status?.() ?? null,
+    managedSettings: runtime.managedSettings ?? {},
+    remoteBridge: runtime.describeRemoteBridge?.() ?? null,
     policy: runtime.permissions.snapshot(),
     conflicts: {
       commands: runtime.pluginDiagnostics.commandConflicts,

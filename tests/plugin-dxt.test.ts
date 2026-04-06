@@ -98,7 +98,8 @@ test('plugin-trust and plugin-autoupdate refresh a trusted plugin manifest', asy
     await runtime.dispatchCommand('plugin-trust', { name: 'sample-pack' });
     const result = await runtime.dispatchCommand('plugin-autoupdate');
     assert.equal(result.ok, true);
-    assert.equal(result.updates[0].to, '0.2.0');
+    assert.equal(result.updates[0].plugin, 'sample-pack');
+    assert.equal(JSON.parse(await readFile(path.join(pluginsDir, 'sample-pack.json'), 'utf8')).version, '0.2.0');
     await runtime.shutdown();
   } finally {
     await server.close();
