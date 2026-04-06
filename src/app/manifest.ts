@@ -58,6 +58,7 @@ export async function loadAppManifest({ cwd = process.cwd(), appPath = null } = 
       commandsDir: resolveMaybe(rootDir, paths.commandsDir ?? 'commands'),
       skillsDir: resolveMaybe(rootDir, paths.skillsDir ?? 'skills'),
       hooksDir: resolveMaybe(rootDir, paths.hooksDir ?? 'hooks'),
+      pluginsDir: resolveMaybe(rootDir, paths.pluginsDir ?? 'plugins'),
       policyPath: await resolveIfExists(rootDir, paths.policyPath ?? 'config/policy.json'),
       providerConfigPath: await resolveIfExists(rootDir, paths.providerConfigPath ?? 'config/providers.json'),
       pluginManifestPath: await resolveIfExists(rootDir, paths.pluginManifestPath ?? 'plugins/browser-pack.json'),

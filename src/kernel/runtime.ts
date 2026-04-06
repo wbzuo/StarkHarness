@@ -120,6 +120,13 @@ export async function createRuntime(options = {}) {
   if (options.pluginManifestPath ?? options.app?.paths?.pluginManifestPath) {
     await plugins.loadManifestFile(options.pluginManifestPath ?? options.app?.paths?.pluginManifestPath);
   }
+  if (options.pluginDirs) {
+    for (const dir of options.pluginDirs) {
+      await plugins.loadManifestDir(dir);
+    }
+  } else if (options.app?.paths?.pluginsDir) {
+    await plugins.loadManifestDir(options.app.paths.pluginsDir);
+  }
   for (const plugin of options.plugins ?? []) {
     plugins.register(plugin);
   }
@@ -256,6 +263,8 @@ export async function createRuntime(options = {}) {
     executor: null,
     orchestrator: null,
     requestPermission: options.requestPermission ?? null,
+    askUserQuestion: options.askUserQuestion ?? null,
+    replSessions: new Map(),
     async persist() {
       await this.state.saveSession(this.session);
       await this.state.saveRuntimeSnapshot(createSnapshot(this));

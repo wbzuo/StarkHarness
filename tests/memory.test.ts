@@ -20,6 +20,17 @@ test('returns empty string when CLAUDE.md missing', async () => {
   assert.equal(claudeMd, '');
 });
 
+test('loads CLAUDE.md with @include directives', async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'sh-mem-'));
+  await writeFile(path.join(root, 'extra.md'), 'Included rules here');
+  await writeFile(path.join(root, 'CLAUDE.md'), '# Main\n@include extra.md\nFinal line');
+  const mem = new MemoryManager({ projectDir: root });
+  const claudeMd = await mem.loadClaudeMd();
+  assert.match(claudeMd, /Main/);
+  assert.match(claudeMd, /Included rules here/);
+  assert.match(claudeMd, /Final line/);
+});
+
 test('loads dynamic memory files with frontmatter', async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), 'sh-mem-'));
   const memDir = path.join(root, '.starkharness', 'memory');

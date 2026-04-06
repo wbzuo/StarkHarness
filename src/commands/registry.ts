@@ -11,6 +11,8 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { generatePkcePair, buildAuthorizationUrl } from '../oauth/pkce.js';
 import { exchangeAuthorizationCode, refreshAccessToken, waitForOAuthCode } from '../oauth/client.js';
+import { webSearch } from '../search/web.js';
+import { writeFile, rm } from 'node:fs/promises';
 
 const execFileAsync = promisify(execFile);
 
@@ -136,6 +138,65 @@ export function createCommandRegistry() {
       description: 'Show a product-style runtime status summary',
       async execute(runtime) {
         return createStatusSummary(runtime);
+      },
+    },
+    {
+      name: 'magic-docs',
+      description: 'Search for related documentation and summarize the top results',
+      async execute(runtime, args = {}) {
+        const topic = args.topic ?? args.prompt ?? '';
+        if (!topic) {
+          throw new Error('magic-docs requires --topic or --prompt');
+        }
+        const search = await webSearch({
+          query: `${topic} documentation`,
+          envConfig: runtime.env,
+          count: Number(args.count ?? 3),
+        });
+        const pages = [];
+        for (const result of search.results.slice(0, Number(args.count ?? 3))) {
+          try {
+            const response = await fetch(result.url);
+            const content = await response.text();
+            pages.push({
+              ...result,
+              content: content.slice(0, 4000),
+            });
+          } catch {
+            pages.push({
+              ...result,
+              content: '',
+            });
+          }
+        }
+
+        const summaryProvider = {
+          complete: ({ systemPrompt, messages, tools }) =>
+            runtime.providers.completeWithStrategy({
+              capability: 'chat',
+              request: { systemPrompt, messages, tools },
+              retryOptions: { maxRetries: 1, baseDelay: 50, timeout: 30000 },
+            }),
+        };
+
+        let summary = pages.map((page) => `- ${page.title}: ${page.snippet}`).join('\n');
+        try {
+          const response = await summaryProvider.complete({
+            systemPrompt: 'Summarize the following documentation findings into a concise developer-oriented brief. Mention the strongest sources.',
+            messages: [{
+              role: 'user',
+              content: JSON.stringify({ topic, pages }),
+            }],
+            tools: [],
+          });
+          summary = response.text ?? summary;
+        } catch {}
+
+        return {
+          topic,
+          summary,
+          sources: pages.map(({ title, url, snippet }) => ({ title, url, snippet })),
+        };
       },
     },
     {
@@ -447,6 +508,55 @@ export function createCommandRegistry() {
       },
     },
     {
+      name: 'plugin-marketplace-list',
+      description: 'List plugins from a configured plugin registry endpoint',
+      async execute(runtime) {
+        const registryUrl = runtime.env?.plugins?.registryUrl;
+        if (!registryUrl) {
+          throw new Error('STARKHARNESS_PLUGIN_REGISTRY_URL is not configured');
+        }
+        const response = await fetch(registryUrl);
+        if (!response.ok) throw new Error(`plugin registry request failed: ${response.status}`);
+        return response.json();
+      },
+    },
+    {
+      name: 'plugin-install',
+      description: 'Install a plugin manifest into the local plugin directory',
+      async execute(runtime, args = {}) {
+        const pluginsDir = runtime.app?.paths?.pluginsDir ?? path.join(runtime.context.cwd, 'plugins');
+        await mkdir(pluginsDir, { recursive: true });
+        let manifest;
+        if (args.url) {
+          const response = await fetch(args.url);
+          if (!response.ok) throw new Error(`plugin download failed: ${response.status}`);
+          manifest = await response.json();
+        } else if (args.manifest) {
+          manifest = typeof args.manifest === 'string' ? JSON.parse(args.manifest) : args.manifest;
+        } else {
+          throw new Error('plugin-install requires --url or --manifest');
+        }
+        const filePath = path.join(pluginsDir, `${manifest.name}.json`);
+        await writeFile(filePath, JSON.stringify(manifest, null, 2), 'utf8');
+        runtime.plugins.register(manifest);
+        return {
+          ok: true,
+          filePath,
+          plugin: manifest.name,
+        };
+      },
+    },
+    {
+      name: 'plugin-uninstall',
+      description: 'Remove a locally installed plugin manifest by name',
+      async execute(runtime, args = {}) {
+        const pluginsDir = runtime.app?.paths?.pluginsDir ?? path.join(runtime.context.cwd, 'plugins');
+        const filePath = path.join(pluginsDir, `${args.name}.json`);
+        await rm(filePath, { force: true });
+        return { ok: true, filePath };
+      },
+    },
+    {
       name: 'feature-flags',
       description: 'Show the current merged feature flags from env and remote config',
       async execute(runtime) {
@@ -670,6 +780,28 @@ export function createCommandRegistry() {
           cwd: runtime.context.cwd,
           ensure: args.ensure === 'true',
         });
+      },
+    },
+    {
+      name: 'dream',
+      description: 'Run a manual memory consolidation pass over the current session transcript',
+      async execute(runtime, args = {}) {
+        const transcript = await runtime.state.loadSessionTranscript(args.sessionId ?? runtime.session.id);
+        const messages = transcript
+          .filter((entry) => entry.type === 'message' && entry.role && entry.content)
+          .map((entry) => ({ role: entry.role, content: entry.content }));
+        const result = await runtime.memory.extractAndPersistMemories({
+          messages,
+          provider: {
+            complete: ({ systemPrompt, messages: promptMessages, tools }) =>
+              runtime.providers.completeWithStrategy({
+                capability: 'chat',
+                request: { systemPrompt, messages: promptMessages, tools },
+                retryOptions: { maxRetries: 1, baseDelay: 50, timeout: 30000 },
+              }),
+          },
+        });
+        return result;
       },
     },
     {

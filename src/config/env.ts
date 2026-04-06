@@ -107,6 +107,9 @@ export async function loadRuntimeEnv({ cwd = process.cwd(), envFilePath = null, 
       growthBookClientKey: raw.STARKHARNESS_GROWTHBOOK_CLIENT_KEY ?? null,
       featureFlags: parseJson(raw.STARKHARNESS_FEATURE_FLAGS, {}),
     },
+    plugins: {
+      registryUrl: raw.STARKHARNESS_PLUGIN_REGISTRY_URL ?? null,
+    },
   };
 }
 

@@ -12,6 +12,30 @@ function parseFrontmatter(content) {
   return { meta, body: match[2].trim() };
 }
 
+async function resolveClaudeIncludes(filePath, seen = new Set()) {
+  if (seen.has(filePath)) return '';
+  seen.add(filePath);
+  const content = await readFile(filePath, 'utf8').catch(() => '');
+  if (!content.trim()) return '';
+
+  const lines = [];
+  for (const line of content.split(/\r?\n/)) {
+    const match = line.match(/^@include\s+(.+)$/);
+    if (!match) {
+      lines.push(line);
+      continue;
+    }
+    const includePath = path.resolve(path.dirname(filePath), match[1].trim());
+    const included = await resolveClaudeIncludes(includePath, seen);
+    if (included.trim()) {
+      lines.push(`\n<!-- included from ${match[1].trim()} -->`);
+      lines.push(included);
+      lines.push(`<!-- end include ${match[1].trim()} -->\n`);
+    }
+  }
+  return lines.join('\n').trim();
+}
+
 export class MemoryManager {
   constructor({ projectDir, userDir }) {
     this.projectDir = projectDir;
@@ -26,7 +50,7 @@ export class MemoryManager {
     ];
     const sections = [];
     for (const p of paths) {
-      const content = await readFile(p, 'utf8').catch(() => '');
+      const content = await resolveClaudeIncludes(p).catch(() => '');
       if (content.trim()) sections.push(content.trim());
     }
     return sections.join('\n\n');

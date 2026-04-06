@@ -2,6 +2,7 @@ import { readFile, writeFile, mkdir, readdir } from 'node:fs/promises';
 import path from 'node:path';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
+import vm from 'node:vm';
 import { defineTool } from '../types.js';
 import { ensureWebAccessReady, callWebAccessProxy, loadSiteContext } from '../../web-access/index.js';
 import { webSearch } from '../../search/web.js';
@@ -163,6 +164,41 @@ export function createBuiltinTools() {
     }),
 
     defineTool({
+      name: 'ask_user_question',
+      capability: 'delegate',
+      description: 'Ask the user a direct question and capture the response inside the runtime.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          question: { type: 'string', description: 'Question to ask the user' },
+          choices: { type: 'array', items: { type: 'string' }, description: 'Optional suggested choices' },
+        },
+        required: ['question'],
+      },
+      async execute(input = {}, runtime) {
+        if (!runtime.askUserQuestion) {
+          return {
+            ok: false,
+            tool: 'ask_user_question',
+            reason: 'interactive-user-input-unavailable',
+            question: input.question,
+            choices: input.choices ?? [],
+          };
+        }
+        const answer = await runtime.askUserQuestion({
+          question: String(input.question),
+          choices: Array.isArray(input.choices) ? input.choices.map(String) : [],
+        });
+        return {
+          ok: true,
+          tool: 'ask_user_question',
+          question: input.question,
+          answer,
+        };
+      },
+    }),
+
+    defineTool({
       name: 'notebook_edit',
       capability: 'write',
       description: 'Edit a Jupyter notebook cell by inserting, replacing, or deleting cells.',
@@ -302,6 +338,65 @@ export function createBuiltinTools() {
           timeout,
         });
         return { ok: true, tool: 'shell', command, stdout, stderr };
+      },
+    }),
+
+    defineTool({
+      name: 'repl_tool',
+      capability: 'exec',
+      description: 'Evaluate JavaScript or Python snippets in a lightweight REPL-style session.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          language: { type: 'string', enum: ['javascript', 'python'], description: 'REPL language', default: 'javascript' },
+          code: { type: 'string', description: 'Code snippet to execute' },
+          session: { type: 'string', description: 'Logical REPL session identifier', default: 'default' },
+        },
+        required: ['code'],
+      },
+      async execute(input = {}, runtime) {
+        const language = input.language ?? 'javascript';
+        const sessionId = input.session ?? 'default';
+        if (language === 'javascript') {
+          const key = `${language}:${sessionId}`;
+          let context = runtime.replSessions.get(key);
+          if (!context) {
+            context = vm.createContext({
+              console,
+              setTimeout,
+              clearTimeout,
+              Buffer,
+              process,
+            });
+            runtime.replSessions.set(key, context);
+          }
+          const fn = vm.compileFunction(String(input.code), [], {
+            parsingContext: context,
+          });
+          const value = await fn.call(context);
+          return {
+            ok: true,
+            tool: 'repl_tool',
+            language,
+            session: sessionId,
+            value,
+          };
+        }
+
+        const runtimeEnv = runtime.env?.raw ?? process.env;
+        const { stdout, stderr } = await execFileAsync('python3', ['-c', String(input.code)], {
+          cwd: runtime.context.cwd,
+          env: runtimeEnv,
+          timeout: 120000,
+        });
+        return {
+          ok: true,
+          tool: 'repl_tool',
+          language,
+          session: sessionId,
+          stdout,
+          stderr,
+        };
       },
     }),
 

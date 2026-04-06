@@ -39,6 +39,14 @@ export async function startRepl(runtime, { json = false, outputStream = output }
     };
   }
 
+  if (!runtime.askUserQuestion && !json) {
+    runtime.askUserQuestion = async ({ question, choices = [] }) => {
+      const hint = choices.length > 0 ? `\nChoices: ${choices.join(', ')}` : '';
+      const answer = await rl.question(`${question}${hint}\n> `);
+      return answer.trim();
+    };
+  }
+
   function emit(line, result, error = null) {
     if (json) {
       const record = { input: line, timestamp: new Date().toISOString() };

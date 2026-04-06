@@ -829,6 +829,36 @@ test('todo_write persists user-facing todos and todos command lists them', async
   await runtime.shutdown();
 });
 
+test('ask_user_question uses runtime askUserQuestion callback', async () => {
+  const { runtime } = await makeRuntime({
+    askUserQuestion: async ({ question }) => `${question} -> answer`,
+  });
+  const result = await runHarnessTurn(runtime, {
+    tool: 'ask_user_question',
+    input: { question: 'Proceed?' },
+  });
+  assert.equal(result.ok, true);
+  assert.equal(result.answer, 'Proceed? -> answer');
+  await runtime.shutdown();
+});
+
+test('repl_tool preserves JavaScript session state', async () => {
+  const { runtime } = await makeRuntime({
+    permissions: { exec: 'allow' },
+  });
+  const first = await runHarnessTurn(runtime, {
+    tool: 'repl_tool',
+    input: { language: 'javascript', session: 'demo', code: 'globalThis.counter = 1; return globalThis.counter;' },
+  });
+  const second = await runHarnessTurn(runtime, {
+    tool: 'repl_tool',
+    input: { language: 'javascript', session: 'demo', code: 'globalThis.counter += 1; return globalThis.counter;' },
+  });
+  assert.equal(first.value, 1);
+  assert.equal(second.value, 2);
+  await runtime.shutdown();
+});
+
 test('cron commands persist and delete scheduled entries', async () => {
   const { runtime } = await makeRuntime();
   const created = await runtime.dispatchCommand('cron-create', {

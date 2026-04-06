@@ -1,4 +1,5 @@
-import { readFile } from 'node:fs/promises';
+import { readFile, readdir } from 'node:fs/promises';
+import path from 'node:path';
 
 export function validatePluginManifest(manifest) {
   if (!manifest || typeof manifest !== 'object') {
@@ -43,6 +44,16 @@ export class PluginLoader {
   async loadManifestFile(manifestPath) {
     const content = await readFile(manifestPath, 'utf8');
     return this.register(JSON.parse(content));
+  }
+
+  async loadManifestDir(dirPath) {
+    const entries = await readdir(dirPath, { withFileTypes: true }).catch(() => []);
+    const loaded = [];
+    for (const entry of entries) {
+      if (!entry.isFile() || !entry.name.endsWith('.json')) continue;
+      loaded.push(await this.loadManifestFile(path.join(dirPath, entry.name)));
+    }
+    return loaded;
   }
 
   list() {
