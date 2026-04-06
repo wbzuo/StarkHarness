@@ -5,7 +5,7 @@ const DEFAULT_BASE_URL = 'https://api.deepseek.com';
 const DEFAULT_MODEL = 'deepseek-chat';
 
 export function createCompatibleProvider(config = {}) {
-  const apiKey = config.apiKey ?? process.env.COMPATIBLE_API_KEY;
+  const apiKey = config.apiKey ?? config.accessToken ?? process.env.COMPATIBLE_API_KEY ?? process.env.COMPATIBLE_ACCESS_TOKEN;
 
   if (!apiKey) {
     const stub = createStubProvider({

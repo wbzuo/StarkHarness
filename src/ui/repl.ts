@@ -29,6 +29,16 @@ export async function startRepl(runtime, { json = false, outputStream = output }
   const transcript = [];
   const prompt = json ? '' : 'stark> ';
 
+  if (!runtime.requestPermission && !json) {
+    runtime.requestPermission = async ({ toolName, capability, toolInput, gate }) => {
+      const summary = toolName === 'shell'
+        ? (toolInput?.command ?? '')
+        : (toolInput?.path ?? toolInput?.file ?? JSON.stringify(toolInput ?? {}));
+      const answer = (await rl.question(`Permission required for ${toolName} (${capability})\nReason: ${gate.reason ?? gate.source ?? 'policy'}\nInput: ${summary}\nAllow? [y/N] `)).trim().toLowerCase();
+      return answer === 'y' || answer === 'yes';
+    };
+  }
+
   function emit(line, result, error = null) {
     if (json) {
       const record = { input: line, timestamp: new Date().toISOString() };

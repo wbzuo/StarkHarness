@@ -1,4 +1,4 @@
-import { readFile, readdir, mkdir } from 'node:fs/promises';
+import { readFile, readdir, mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
 function parseFrontmatter(content) {
@@ -55,5 +55,64 @@ export class MemoryManager {
     const memories = await this.loadDynamicMemory();
     const memoryString = memories.map((m) => `[${m.type}:${m.name}] ${m.content}`).join('\n');
     return { claudeMd, memoryString, memories };
+  }
+
+  async persistAutoMemory(entries = []) {
+    if (!Array.isArray(entries) || entries.length === 0) return null;
+    await mkdir(this.memoryDir, { recursive: true }).catch(() => {});
+    const target = path.join(this.memoryDir, 'auto-memory.md');
+    const existing = await readFile(target, 'utf8').catch(() => '');
+    const current = existing.trim()
+      ? parseFrontmatter(existing).body.split('\n').filter(Boolean)
+      : [];
+    const merged = [...new Set([...current, ...entries.map((entry) => `- ${entry}`)])];
+    const content = [
+      '---',
+      'name: auto-memory',
+      'type: auto',
+      'description: Auto-extracted durable memories',
+      '---',
+      '',
+      ...merged,
+      '',
+    ].join('\n');
+    await writeFile(target, content, 'utf8');
+    return target;
+  }
+
+  async extractAndPersistMemories({ messages = [], provider } = {}) {
+    if (!provider || !Array.isArray(messages) || messages.length === 0) return { entries: [], path: null, strategy: 'disabled' };
+    const transcript = messages
+      .map((message) => `${message.role.toUpperCase()}: ${typeof message.content === 'string' ? message.content : JSON.stringify(message.content)}`)
+      .join('\n\n');
+
+    let text = '';
+    try {
+      const response = await provider.complete({
+        systemPrompt: 'Extract 0-5 durable memories from the conversation. Return only a JSON array of short strings.',
+        messages: [{ role: 'user', content: transcript }],
+        tools: [],
+      });
+      text = response.text ?? '';
+    } catch {
+      return { entries: [], path: null, strategy: 'error' };
+    }
+
+    let entries = [];
+    try {
+      entries = JSON.parse(text);
+    } catch {
+      entries = text
+        .split(/\r?\n/)
+        .map((line) => line.replace(/^[-*\d.\s]+/, '').trim())
+        .filter(Boolean);
+    }
+    entries = entries
+      .map((entry) => String(entry).trim())
+      .filter((entry) => entry.length > 0)
+      .slice(0, 5);
+
+    const memoryPath = await this.persistAutoMemory(entries);
+    return { entries, path: memoryPath, strategy: 'llm' };
   }
 }

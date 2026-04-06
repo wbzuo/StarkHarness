@@ -8,6 +8,7 @@ export class StateStore {
     this.runtimePath = path.join(rootDir, 'runtime.json');
     this.agentDir = path.join(rootDir, 'agents');
     this.todosPath = path.join(rootDir, 'todos.json');
+    this.authProfilesPath = path.join(rootDir, 'auth-profiles.json');
   }
 
   async init() {
@@ -18,6 +19,10 @@ export class StateStore {
 
   getSessionPath(sessionId) {
     return path.join(this.sessionDir, `${sessionId}.json`);
+  }
+
+  getSessionTranscriptPath(sessionId) {
+    return path.join(this.sessionDir, `${sessionId}.transcript.jsonl`);
   }
 
   getAgentRoot(agentId) {
@@ -50,6 +55,20 @@ export class StateStore {
     const target = this.getSessionPath(sessionId);
     const content = await readFile(target, 'utf8');
     return JSON.parse(content);
+  }
+
+  async appendSessionTranscript(sessionId, entry) {
+    const target = this.getSessionTranscriptPath(sessionId);
+    await appendFile(target, `${JSON.stringify(entry)}\n`, 'utf8');
+    return target;
+  }
+
+  async loadSessionTranscript(sessionId) {
+    const content = await readFile(this.getSessionTranscriptPath(sessionId), 'utf8').catch(() => '');
+    return content
+      .split('\n')
+      .filter(Boolean)
+      .map((line) => JSON.parse(line));
   }
 
   async listSessions() {
@@ -129,5 +148,28 @@ export class StateStore {
   async loadTodos() {
     const content = await readFile(this.todosPath, 'utf8').catch(() => '[]');
     return JSON.parse(content);
+  }
+
+  async loadAuthProfiles() {
+    const content = await readFile(this.authProfilesPath, 'utf8').catch(() => '{}');
+    return JSON.parse(content);
+  }
+
+  async saveAuthProfile(provider, profile) {
+    const current = await this.loadAuthProfiles();
+    current[provider] = {
+      ...(current[provider] ?? {}),
+      ...profile,
+      updatedAt: new Date().toISOString(),
+    };
+    await writeFile(this.authProfilesPath, JSON.stringify(current, null, 2), 'utf8');
+    return current[provider];
+  }
+
+  async removeAuthProfile(provider) {
+    const current = await this.loadAuthProfiles();
+    delete current[provider];
+    await writeFile(this.authProfilesPath, JSON.stringify(current, null, 2), 'utf8');
+    return current;
   }
 }

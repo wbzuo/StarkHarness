@@ -16,7 +16,17 @@ export class AgentLoop {
     // 1. Permission check
     const gate = permissions.evaluate({ capability: tool.capability, toolName: tool.name, toolInput: input, cwd: this._runtime?.context?.cwd });
     if (gate.decision === 'deny') return { ok: false, reason: 'permission-denied', tool: toolName, gate };
-    if (gate.decision === 'ask') return { ok: false, reason: 'permission-escalation-required', tool: toolName, gate };
+    if (gate.decision === 'ask') {
+      const approved = await this._runtime?.requestPermission?.({
+        toolName,
+        capability: tool.capability,
+        toolInput: input,
+        gate,
+      });
+      if (approved !== true) {
+        return { ok: false, reason: 'permission-escalation-required', tool: toolName, gate };
+      }
+    }
 
     // 2. PreToolUse hooks
     const preResult = await this.hooks.fire('PreToolUse', { toolName, toolInput: input });

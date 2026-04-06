@@ -116,7 +116,17 @@ export class AgentRunner {
     // Permission check
     const gate = permissions.evaluate({ capability: tool.capability, toolName: tool.name, toolInput: toolCall.input, cwd: this._runtime?.context?.cwd });
     if (gate.decision === 'deny') return { ok: false, reason: 'permission-denied', tool: toolCall.name, gate };
-    if (gate.decision === 'ask') return { ok: false, reason: 'permission-escalation-required', tool: toolCall.name, gate };
+    if (gate.decision === 'ask') {
+      const approved = await this._runtime?.requestPermission?.({
+        toolName: toolCall.name,
+        capability: tool.capability,
+        toolInput: toolCall.input,
+        gate,
+      });
+      if (approved !== true) {
+        return { ok: false, reason: 'permission-escalation-required', tool: toolCall.name, gate };
+      }
+    }
 
     // PreToolUse hook
     const preResult = await this.hooks.fire('PreToolUse', { toolName: toolCall.name, toolInput: toolCall.input });

@@ -9,6 +9,8 @@ import { mkdir } from 'node:fs/promises';
 import path from 'node:path';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
+import { generatePkcePair, buildAuthorizationUrl } from '../oauth/pkce.js';
+import { exchangeAuthorizationCode, refreshAccessToken, waitForOAuthCode } from '../oauth/client.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -270,6 +272,59 @@ export function createCommandRegistry() {
       name: 'login',
       description: 'Persist provider credentials/config into the app or workspace env file and reload runtime providers',
       async execute(runtime, args = {}) {
+        if (args.method === 'oauth') {
+          const provider = args.provider ?? 'openai';
+          const pkce = generatePkcePair();
+          const callback = await waitForOAuthCode({ timeoutMs: Number(args.timeoutMs ?? 120000) });
+          const authorizeUrl = buildAuthorizationUrl({
+            authorizeUrl: args.authorizeUrl,
+            clientId: args.clientId,
+            redirectUri: callback.redirectUri,
+            scope: args.scope ?? '',
+            state: pkce.state,
+            codeChallenge: pkce.challenge,
+            codeChallengeMethod: pkce.method,
+          });
+
+          const codePromise = callback.promise.then(async ({ code, state }) => {
+            if (state !== pkce.state) throw new Error('oauth state mismatch');
+            const token = await exchangeAuthorizationCode({
+              tokenUrl: args.tokenUrl,
+              clientId: args.clientId,
+              clientSecret: args.clientSecret ?? null,
+              code,
+              redirectUri: callback.redirectUri,
+              codeVerifier: pkce.verifier,
+            });
+            const profile = await runtime.state.saveAuthProfile(provider, {
+              mode: 'oauth',
+              authorizeUrl: args.authorizeUrl,
+              tokenUrl: args.tokenUrl,
+              clientId: args.clientId,
+              accessToken: token.access_token ?? null,
+              refreshToken: token.refresh_token ?? null,
+              expiresIn: token.expires_in ?? null,
+              scope: token.scope ?? args.scope ?? '',
+            });
+            await runtime.reloadEnvAndProviders();
+            return {
+              ok: true,
+              provider,
+              authorizationUrl: authorizeUrl,
+              redirectUri: callback.redirectUri,
+              profile,
+            };
+          });
+
+          return {
+            ok: true,
+            provider,
+            authorizationUrl: authorizeUrl,
+            redirectUri: callback.redirectUri,
+            state: pkce.state,
+            waitForCompletion: codePromise,
+          };
+        }
         const provider = args.provider ?? 'openai';
         const keyMap = {
           anthropic: {
@@ -307,6 +362,51 @@ export function createCommandRegistry() {
           filePath,
           status: await runtime.dispatchCommand('login-status'),
         };
+      },
+    },
+    {
+      name: 'oauth-refresh',
+      description: 'Refresh an OAuth access token for a saved provider profile',
+      async execute(runtime, args = {}) {
+        const provider = args.provider ?? 'openai';
+        const profiles = await runtime.state.loadAuthProfiles();
+        const profile = profiles[provider];
+        if (!profile?.refreshToken || !profile?.tokenUrl || !profile?.clientId) {
+          throw new Error(`No refreshable OAuth profile found for ${provider}`);
+        }
+        const token = await refreshAccessToken({
+          tokenUrl: profile.tokenUrl,
+          clientId: profile.clientId,
+          clientSecret: args.clientSecret ?? null,
+          refreshToken: profile.refreshToken,
+        });
+        const nextProfile = await runtime.state.saveAuthProfile(provider, {
+          accessToken: token.access_token ?? profile.accessToken,
+          refreshToken: token.refresh_token ?? profile.refreshToken,
+          expiresIn: token.expires_in ?? profile.expiresIn ?? null,
+          scope: token.scope ?? profile.scope ?? '',
+        });
+        await runtime.reloadEnvAndProviders();
+        return { ok: true, provider, profile: nextProfile };
+      },
+    },
+    {
+      name: 'oauth-status',
+      description: 'Show saved OAuth profiles and token availability',
+      async execute(runtime) {
+        const profiles = await runtime.state.loadAuthProfiles();
+        return Object.fromEntries(
+          Object.entries(profiles).map(([provider, profile]) => [
+            provider,
+            {
+              mode: profile.mode ?? 'oauth',
+              accessToken: Boolean(profile.accessToken),
+              refreshToken: Boolean(profile.refreshToken),
+              scope: profile.scope ?? '',
+              updatedAt: profile.updatedAt ?? null,
+            },
+          ]),
+        );
       },
     },
     {
@@ -385,6 +485,13 @@ export function createCommandRegistry() {
       description: 'Summarize the current resumed session',
       async execute(runtime) {
         return createSessionSummary(runtime);
+      },
+    },
+    {
+      name: 'session-transcript',
+      description: 'Load the persisted session transcript entries',
+      async execute(runtime, args = {}) {
+        return runtime.state.loadSessionTranscript(args.sessionId ?? runtime.session.id);
       },
     },
     {

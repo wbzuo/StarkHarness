@@ -65,10 +65,11 @@ export async function createRuntime(options = {}) {
     features: {},
     telemetry: {},
   };
+  const authProfiles = await state.loadAuthProfiles().catch(() => ({}));
   const filePolicy = await loadPolicyFile(options.policyPath ?? options.app?.paths?.policyPath, { includeDefaults: false });
   const loadedProviderConfig = await loadProviderConfig(options.providerConfigPath ?? options.app?.paths?.providerConfigPath);
   const providerConfig = mergeProviderConfig(
-    mergeProviderConfig(loadedProviderConfig, envConfig.providers),
+    mergeProviderConfig(mergeProviderConfig(loadedProviderConfig, envConfig.providers), authProfiles),
     options.providerConfig ?? {},
   );
   const profilePolicy = getSandboxProfile(options.sandboxProfile);
@@ -254,6 +255,7 @@ export async function createRuntime(options = {}) {
     scheduler,
     executor: null,
     orchestrator: null,
+    requestPermission: options.requestPermission ?? null,
     async persist() {
       await this.state.saveSession(this.session);
       await this.state.saveRuntimeSnapshot(createSnapshot(this));
@@ -286,11 +288,22 @@ export async function createRuntime(options = {}) {
     },
     async dispatchTurn(turn, options = {}) {
       await this.log('turn:start', turn);
+      await this.state.appendSessionTranscript(this.session.id, {
+        type: 'tool-turn:start',
+        turn,
+        recordedAt: new Date().toISOString(),
+      });
       const result = await this.loop.executeTurn(turn, options);
       if (result.ok) {
         this.session.turns.push({ turn, result, recordedAt: new Date().toISOString() });
         await this.persist();
       }
+      await this.state.appendSessionTranscript(this.session.id, {
+        type: 'tool-turn:result',
+        turn,
+        result,
+        recordedAt: new Date().toISOString(),
+      });
       await this.log(result.ok ? 'turn:complete' : `turn:${result.reason}`, { turn, result });
       return result;
     },
@@ -304,6 +317,12 @@ export async function createRuntime(options = {}) {
       const trace = this.startTrace();
       const runSpan = trace.startSpan('run', { userMessage: userMessage.slice(0, 100) });
       await this.log('run:start', { userMessage });
+      await this.state.appendSessionTranscript(this.session.id, {
+        type: 'message',
+        role: 'user',
+        content: userMessage,
+        recordedAt: new Date().toISOString(),
+      });
       const discovered = this.skills.listDiscovered();
       const skillMap = new Map(discovered.map((skill) => [skill.dir, skill]));
       const match = matchAndBind(userMessage, skillMap);
@@ -340,6 +359,13 @@ export async function createRuntime(options = {}) {
       }).finally(() => {
         this.context.activeSkill = previousActiveSkill;
       });
+      await this.state.appendSessionTranscript(this.session.id, {
+        type: 'message',
+        role: 'assistant',
+        content: result.finalText,
+        traceId: trace.traceId,
+        recordedAt: new Date().toISOString(),
+      });
       // Persist each tool turn back into the session
       for (const turn of result.turns) {
         this.session.turns.push({
@@ -347,8 +373,36 @@ export async function createRuntime(options = {}) {
           result: turn.result,
           recordedAt: new Date().toISOString(),
         });
+        await this.state.appendSessionTranscript(this.session.id, {
+          type: 'tool-result',
+          tool: turn.toolName,
+          input: turn.input,
+          result: turn.result,
+          traceId: trace.traceId,
+          recordedAt: new Date().toISOString(),
+        });
       }
       await this.persist();
+      const memoryResult = await this.memory.extractAndPersistMemories({
+        messages: result.messages,
+        provider: {
+          complete: ({ systemPrompt, messages, tools }) =>
+            this.providers.completeWithStrategy({
+              capability: 'chat',
+              request: { systemPrompt, messages, tools },
+              retryOptions: { maxRetries: 1, baseDelay: 50, timeout: 30000 },
+            }),
+        },
+      });
+      if (memoryResult.strategy === 'error') {
+        await this.log('memory:extract:error', { traceId: trace.traceId });
+      } else if (memoryResult.entries.length > 0) {
+        await this.log('memory:extract:complete', {
+          traceId: trace.traceId,
+          count: memoryResult.entries.length,
+          path: memoryResult.path,
+        });
+      }
       runSpan.addEvent('complete', { turns: result.turns.length, stopReason: result.stopReason, compactions: result.compactions ?? 0 });
       trace.endSpan(runSpan.spanId);
       await this.telemetry.emitSpan(runSpan);

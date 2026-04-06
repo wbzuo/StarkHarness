@@ -5,7 +5,7 @@ const DEFAULT_BASE_URL = 'https://api.openai.com';
 const DEFAULT_MODEL = 'gpt-5';
 
 export function createOpenAIProvider(config = {}) {
-  const apiKey = config.apiKey ?? process.env.OPENAI_API_KEY;
+  const apiKey = config.apiKey ?? config.accessToken ?? process.env.OPENAI_API_KEY ?? process.env.OPENAI_ACCESS_TOKEN;
 
   if (!apiKey) {
     const stub = createStubProvider({
