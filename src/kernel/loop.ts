@@ -14,7 +14,7 @@ export class AgentLoop {
     const permissions = options.permissions ?? this.permissions;
 
     // 1. Permission check
-    const gate = permissions.evaluate({ capability: tool.capability, toolName: tool.name });
+    const gate = permissions.evaluate({ capability: tool.capability, toolName: tool.name, toolInput: input, cwd: this._runtime?.context?.cwd });
     if (gate.decision === 'deny') return { ok: false, reason: 'permission-denied', tool: toolName, gate };
     if (gate.decision === 'ask') return { ok: false, reason: 'permission-escalation-required', tool: toolName, gate };
 
