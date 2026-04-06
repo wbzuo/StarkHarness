@@ -49,6 +49,64 @@ function matchesGlob(filePath, pattern, cwd) {
   return regex.test(relative) || (!pattern.includes('/') && regex.test(base));
 }
 
+function lineNumberFromIndex(content, index) {
+  return content.slice(0, index).split('\n').length;
+}
+
+function snippetAroundLine(content, lineNumber, radius = 1) {
+  const lines = content.split('\n');
+  const start = Math.max(0, lineNumber - 1 - radius);
+  const end = Math.min(lines.length, lineNumber + radius);
+  return lines.slice(start, end).join('\n');
+}
+
+function collectOccurrences(content, search) {
+  const occurrences = [];
+  let fromIndex = 0;
+  while (true) {
+    const index = content.indexOf(search, fromIndex);
+    if (index === -1) break;
+    const line = lineNumberFromIndex(content, index);
+    occurrences.push({
+      index,
+      line,
+      preview: snippetAroundLine(content, line),
+    });
+    fromIndex = index + Math.max(search.length, 1);
+  }
+  return occurrences;
+}
+
+function createEditDiff(current, next, occurrence) {
+  const changedLine = occurrence?.line ?? 1;
+  return {
+    line: changedLine,
+    before: snippetAroundLine(current, changedLine),
+    after: snippetAroundLine(next, changedLine),
+  };
+}
+
+function createRegex(query, { caseSensitive = false } = {}) {
+  return new RegExp(query, caseSensitive ? 'g' : 'gi');
+}
+
+function grepFile(content, filePath, regex, { before = 0, after = 0 } = {}) {
+  const lines = content.split('\n');
+  const matches = [];
+  for (let index = 0; index < lines.length; index += 1) {
+    regex.lastIndex = 0;
+    if (!regex.test(lines[index])) continue;
+    matches.push({
+      path: filePath,
+      line: index + 1,
+      text: lines[index],
+      before: lines.slice(Math.max(0, index - before), index),
+      after: lines.slice(index + 1, Math.min(lines.length, index + 1 + after)),
+    });
+  }
+  return matches;
+}
+
 function resolveWorkspacePath(runtime, targetPath = '.') {
   if (!targetPath) return runtime.context.cwd;
   return path.resolve(runtime.context.cwd, targetPath);
@@ -136,9 +194,27 @@ export function createBuiltinTools() {
         }
         const search = input.old_string ?? input.oldString;
         const replacement = input.new_string ?? input.newString ?? '';
+        const occurrences = collectOccurrences(current, search);
+        if (!input.replace_all && occurrences.length > 1) {
+          return {
+            ok: false,
+            tool: 'edit_file',
+            reason: 'old-string-not-unique',
+            path: filePath,
+            occurrences: occurrences.length,
+            matches: occurrences.map(({ line, preview }) => ({ line, preview })),
+          };
+        }
         const next = input.replace_all ? current.replaceAll(search, replacement) : current.replace(search, replacement);
         await writeFile(filePath, next, 'utf8');
-        return { ok: true, tool: 'edit_file', path: filePath };
+        return {
+          ok: true,
+          tool: 'edit_file',
+          path: filePath,
+          occurrences: occurrences.length,
+          replacements: input.replace_all ? occurrences.length : 1,
+          diff: createEditDiff(current, next, occurrences[0]),
+        };
       },
     }),
 
@@ -201,6 +277,52 @@ export function createBuiltinTools() {
           });
         }
         return { ok: true, tool: 'search', query, matches };
+      },
+    }),
+
+    defineTool({
+      name: 'grep',
+      capability: 'read',
+      description: 'Search workspace file contents using a regex pattern with optional context lines.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          pattern: { type: 'string', description: 'Regular expression pattern to search for' },
+          glob: { type: 'string', description: 'Optional file glob filter' },
+          before: { type: 'number', description: 'Number of context lines before each match', default: 0 },
+          after: { type: 'number', description: 'Number of context lines after each match', default: 0 },
+          caseSensitive: { type: 'boolean', description: 'Whether matching should be case-sensitive', default: false },
+          maxMatches: { type: 'number', description: 'Maximum number of matches to return', default: 100 },
+        },
+        required: ['pattern'],
+      },
+      async execute(input = {}, runtime) {
+        const files = await walkFiles(runtime.context.cwd);
+        const filtered = input.glob
+          ? files.filter((filePath) => matchesGlob(filePath, String(input.glob), runtime.context.cwd))
+          : files;
+        let regex;
+        try {
+          regex = createRegex(String(input.pattern ?? ''), { caseSensitive: input.caseSensitive === true });
+        } catch (error) {
+          return { ok: false, tool: 'grep', reason: 'invalid-pattern', error: error instanceof Error ? error.message : String(error) };
+        }
+        const before = Number(input.before ?? 0);
+        const after = Number(input.after ?? 0);
+        const maxMatches = Number(input.maxMatches ?? 100);
+        const matches = [];
+        for (const filePath of filtered) {
+          const content = await readFile(filePath, 'utf8').catch(() => null);
+          if (!content) continue;
+          matches.push(...grepFile(content, filePath, regex, { before, after }));
+          if (matches.length >= maxMatches) break;
+        }
+        return {
+          ok: true,
+          tool: 'grep',
+          pattern: String(input.pattern ?? ''),
+          matches: matches.slice(0, maxMatches),
+        };
       },
     }),
 
@@ -520,6 +642,45 @@ export function createBuiltinTools() {
         }
         await runtime.persist();
         return { ok: true, tool: 'tasks', task, tasks: runtime.tasks.list() };
+      },
+    }),
+
+    defineTool({
+      name: 'todo_write',
+      capability: 'delegate',
+      description: 'Persist a user-facing todo list for the current workspace.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          todos: {
+            type: 'array',
+            items: {
+              type: 'object',
+              properties: {
+                content: { type: 'string' },
+                status: { type: 'string' },
+                priority: { type: 'string' },
+              },
+              required: ['content'],
+            },
+          },
+        },
+        required: ['todos'],
+      },
+      async execute(input = {}, runtime) {
+        const todos = (input.todos ?? []).map((todo, index) => ({
+          id: todo.id ?? `todo-${index + 1}`,
+          content: todo.content,
+          status: todo.status ?? 'pending',
+          priority: todo.priority ?? 'medium',
+        }));
+        const filePath = await runtime.state.saveTodos(todos);
+        return {
+          ok: true,
+          tool: 'todo_write',
+          filePath,
+          todos,
+        };
       },
     }),
   ];

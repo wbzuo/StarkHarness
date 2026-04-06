@@ -207,6 +207,45 @@ test('write and edit tools modify workspace files when permitted', async () => {
   assert.equal(finalContent, 'alpha gamma');
 });
 
+test('edit_file reports non-unique matches with line previews', async () => {
+  const { runtime } = await makeRuntime();
+  runtime.permissions.rules.write = 'allow';
+  await runHarnessTurn(runtime, {
+    tool: 'write_file',
+    input: { path: 'notes/repeat.txt', content: 'alpha\nbeta\nalpha\n' },
+  });
+
+  const result = await runHarnessTurn(runtime, {
+    tool: 'edit_file',
+    input: { path: 'notes/repeat.txt', old_string: 'alpha', new_string: 'gamma' },
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.reason, 'old-string-not-unique');
+  assert.equal(result.occurrences, 2);
+  assert.equal(result.matches[0].line, 1);
+});
+
+test('edit_file returns diff metadata on success', async () => {
+  const { runtime } = await makeRuntime();
+  runtime.permissions.rules.write = 'allow';
+  await runHarnessTurn(runtime, {
+    tool: 'write_file',
+    input: { path: 'notes/diff.txt', content: 'alpha\nbeta\n' },
+  });
+
+  const result = await runHarnessTurn(runtime, {
+    tool: 'edit_file',
+    input: { path: 'notes/diff.txt', old_string: 'beta', new_string: 'gamma' },
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.replacements, 1);
+  assert.equal(result.diff.line, 2);
+  assert.match(result.diff.before, /beta/);
+  assert.match(result.diff.after, /gamma/);
+});
+
 test('search and glob tools inspect workspace contents', async () => {
   const { runtime, root } = await makeRuntime();
   runtime.permissions.rules.write = 'allow';
@@ -248,6 +287,30 @@ test('search and glob tools inspect workspace contents', async () => {
   });
   assert.equal(globPattern.ok, true);
   assert.deepEqual(globPattern.matches, [path.join(root, 'src/index.js')]);
+});
+
+test('grep tool supports regex and context lines', async () => {
+  const { runtime, root } = await makeRuntime();
+  runtime.permissions.rules.write = 'allow';
+  await runHarnessTurn(runtime, {
+    tool: 'write_file',
+    input: {
+      path: 'logs/app.log',
+      content: ['one', 'ERROR failure', 'details', 'WARN skip'].join('\n'),
+    },
+  });
+
+  const result = await runHarnessTurn(runtime, {
+    tool: 'grep',
+    input: { pattern: 'ERROR|WARN', before: 1, after: 1 },
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.matches.length, 2);
+  assert.equal(result.matches[0].line, 2);
+  assert.deepEqual(result.matches[0].before, ['one']);
+  assert.deepEqual(result.matches[0].after, ['details']);
+  assert.equal(result.matches[1].path, path.join(root, 'logs/app.log'));
 });
 
 test('delegate tools persist agents tasks and messages', async () => {
@@ -631,6 +694,49 @@ test('status command returns a consolidated runtime view', async () => {
   assert.equal(typeof status.providers.openai, 'boolean');
   assert.equal(typeof status.features.remoteControl, 'boolean');
   assert.equal(typeof status.webAccess.available, 'boolean');
+  await runtime.shutdown();
+});
+
+test('plan mode commands toggle session mode and affect runtime prompting', async () => {
+  const { runtime } = await makeRuntime();
+  await runtime.dispatchCommand('enter-plan-mode');
+  const planStatus = await runtime.dispatchCommand('plan-status');
+  assert.equal(planStatus.enabled, true);
+  assert.equal(runtime.session.mode, 'plan');
+
+  runtime.runner.run = async ({ systemPrompt }) => ({
+    finalText: 'planned',
+    turns: [],
+    messages: [],
+    stopReason: 'end_turn',
+    usage: {},
+    _systemPrompt: systemPrompt,
+  });
+
+  const result = await runtime.run('Should we refactor this module?');
+  assert.match(result._systemPrompt, /Plan Mode/);
+
+  await runtime.dispatchCommand('exit-plan-mode');
+  const after = await runtime.dispatchCommand('plan-status');
+  assert.equal(after.enabled, false);
+  await runtime.shutdown();
+});
+
+test('todo_write persists user-facing todos and todos command lists them', async () => {
+  const { runtime } = await makeRuntime();
+  const result = await runHarnessTurn(runtime, {
+    tool: 'todo_write',
+    input: {
+      todos: [
+        { content: 'Add grep tool', status: 'in_progress', priority: 'high' },
+        { content: 'Write docs', status: 'pending', priority: 'medium' },
+      ],
+    },
+  });
+  assert.equal(result.ok, true);
+  const todos = await runtime.dispatchCommand('todos');
+  assert.equal(todos.length, 2);
+  assert.equal(todos[0].content, 'Add grep tool');
   await runtime.shutdown();
 });
 

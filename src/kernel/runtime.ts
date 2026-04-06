@@ -323,13 +323,16 @@ export async function createRuntime(options = {}) {
       const effectiveSystemPrompt = binding
         ? `${this.context.systemPrompt}${binding.promptAddendum}`
         : this.context.systemPrompt;
+      const modePrompt = this.session.mode === 'plan'
+        ? `${effectiveSystemPrompt}\n\n# Plan Mode\nYou are in read-only planning mode. Do not edit files or execute mutating work. Produce plans, analysis, and implementation guidance only.`
+        : effectiveSystemPrompt;
       const previousActiveSkill = this.context.activeSkill ?? null;
       this.context.activeSkill = binding?.path
         ? { name: binding.name, dir: binding.path }
         : null;
       const result = await this.runner.run({
         userMessage,
-        systemPrompt: effectiveSystemPrompt,
+        systemPrompt: modePrompt,
         onTextChunk: (chunk) => options.onTextChunk?.(chunk, { traceId: trace.traceId }),
         permissions: options.permissions,
       }).finally(() => {

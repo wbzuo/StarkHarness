@@ -7,6 +7,7 @@ export class StateStore {
     this.sessionDir = path.join(rootDir, 'sessions');
     this.runtimePath = path.join(rootDir, 'runtime.json');
     this.agentDir = path.join(rootDir, 'agents');
+    this.todosPath = path.join(rootDir, 'todos.json');
   }
 
   async init() {
@@ -117,6 +118,16 @@ export class StateStore {
   async loadAgentWorker(agentId) {
     const target = this.getAgentWorkerPath(agentId);
     const content = await readFile(target, 'utf8');
+    return JSON.parse(content);
+  }
+
+  async saveTodos(todos) {
+    await writeFile(this.todosPath, JSON.stringify(todos, null, 2), 'utf8');
+    return this.todosPath;
+  }
+
+  async loadTodos() {
+    const content = await readFile(this.todosPath, 'utf8').catch(() => '[]');
     return JSON.parse(content);
   }
 }

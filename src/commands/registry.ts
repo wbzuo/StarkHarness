@@ -131,6 +131,36 @@ export function createCommandRegistry() {
       },
     },
     {
+      name: 'enter-plan-mode',
+      description: 'Switch the session into read-only planning mode',
+      async execute(runtime) {
+        runtime.session.mode = 'plan';
+        runtime.context.mode = 'plan';
+        await runtime.persist();
+        return { ok: true, mode: runtime.session.mode };
+      },
+    },
+    {
+      name: 'exit-plan-mode',
+      description: 'Exit read-only planning mode and return to interactive mode',
+      async execute(runtime) {
+        runtime.session.mode = 'interactive';
+        runtime.context.mode = 'interactive';
+        await runtime.persist();
+        return { ok: true, mode: runtime.session.mode };
+      },
+    },
+    {
+      name: 'plan-status',
+      description: 'Show whether plan mode is currently active',
+      async execute(runtime) {
+        return {
+          enabled: runtime.session.mode === 'plan',
+          mode: runtime.session.mode,
+        };
+      },
+    },
+    {
       name: 'starter-apps',
       description: 'List available starter app templates',
       async execute() {
@@ -542,6 +572,13 @@ export function createCommandRegistry() {
           eventNames: [...new Set(events.map((entry) => entry.eventName))],
           lastEvent: events.at(-1) ?? null,
         };
+      },
+    },
+    {
+      name: 'todos',
+      description: 'List persisted user-facing todos for the current workspace',
+      async execute(runtime) {
+        return runtime.state.loadTodos();
       },
     },
     {
