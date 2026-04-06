@@ -69,7 +69,7 @@ async function main(argv = process.argv.slice(2)) {
   });
   const promptSession = process.stdin.isTTY
     && process.stdout.isTTY
-    && !['repl', 'chat', 'serve', 'dev', 'pipe'].includes(command)
+    && !['repl', 'chat', 'serve', 'dev', 'pipe', 'tui'].includes(command)
     ? createInteractivePromptSession(runtime)
     : null;
 
@@ -77,6 +77,12 @@ async function main(argv = process.argv.slice(2)) {
   if (command === 'repl' || command === 'chat') {
     const { startRepl } = await import('./ui/repl.js');
     await startRepl(runtime, { json: extraArgs.json === 'true' });
+    await finalizeCli(runtime, 0);
+  }
+
+  if (command === 'tui') {
+    const { startTui } = await import('./ui/tui.js');
+    await startTui(runtime);
     await finalizeCli(runtime, 0);
   }
 

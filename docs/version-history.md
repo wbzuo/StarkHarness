@@ -78,6 +78,33 @@ The active line now includes all earlier milestones plus:
 - swarm convenience commands:
   - `swarm-start`
   - `swarm-status`
+- tmux-backed multi-terminal swarm commands:
+  - `swarm-launch`
+  - `swarm-list`
+  - `swarm-stop`
+- file cache commands:
+  - `file-cache-status`
+  - `file-cache-clear`
+- managed settings and remote bridge commands:
+  - `settings-status`
+  - `settings-sync`
+  - `remote-status`
+  - `remote-connect`
+  - `remote-poll`
+  - `remote-disconnect`
+- DXT and plugin trust commands:
+  - `plugin-package-dxt`
+  - `plugin-validate-dxt`
+  - `plugin-trust`
+  - `plugin-trust-list`
+  - `plugin-autoupdate`
+- background dream and scheduler commands:
+  - `dream-start`
+  - `dream-stop`
+  - `dream-status`
+  - `cron-run-due`
+- dependency-free TUI dashboard:
+  - `tui`
 - interactive permission prompts for normal interactive CLI flows, not just REPL
 - coordinator mode now enforces a restricted tool surface instead of relying only on prompt wording
 - agent summaries now prefer an LLM summary and fall back to text truncation only when needed

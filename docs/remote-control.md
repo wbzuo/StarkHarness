@@ -2,6 +2,11 @@
 
 Remote Control is the bridge surface that turns StarkHarness into a controllable runtime instead of just a local CLI.
 
+It now has two layers:
+
+- the local HTTP / SSE / WebSocket bridge
+- the remote bridge client that can poll a cloud control plane and execute returned commands or runs
+
 ## HTTP Surface
 
 Key endpoints:
@@ -26,6 +31,33 @@ Key endpoints:
 - `POST /command/:name`
 - `POST /run`
 - `POST /stream`
+
+## Remote Bridge Client
+
+Remote bridge client commands:
+
+- `remote-status`
+- `remote-connect`
+- `remote-poll`
+- `remote-disconnect`
+
+Managed settings commands:
+
+- `settings-status`
+- `settings-sync`
+
+Current remote bridge mode is a dependency-free polling client, driven by:
+
+- `STARKHARNESS_REMOTE_BRIDGE_URL`
+- `STARKHARNESS_REMOTE_BRIDGE_TOKEN`
+- `STARKHARNESS_REMOTE_BRIDGE_CLIENT_ID`
+- `STARKHARNESS_REMOTE_BRIDGE_POLL_MS`
+
+Managed settings are driven by:
+
+- `STARKHARNESS_MANAGED_SETTINGS_URL`
+- `STARKHARNESS_MANAGED_SETTINGS_TOKEN`
+- `STARKHARNESS_MANAGED_SETTINGS_AUTO_SYNC`
 
 ## WebSocket Surface
 

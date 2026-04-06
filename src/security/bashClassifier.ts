@@ -1,11 +1,10 @@
+import { parseBashCommand } from './bashParser.js';
+
 const DENY_PATTERNS = [
-  { pattern: /rm\s+-rf\s+\/(\s|$)/i, reason: 'recursive delete of filesystem root' },
   { pattern: /\bmkfs(\.\w+)?\b/i, reason: 'filesystem formatting command' },
   { pattern: /\bdd\s+if=/i, reason: 'raw block copy command' },
   { pattern: /:\s*\(\)\s*\{/i, reason: 'fork bomb pattern' },
   { pattern: /\b(shutdown|reboot|halt)\b/i, reason: 'system shutdown or reboot command' },
-  { pattern: /\b(chmod\s+-R\s+777|chown\s+-R\s+root)\b/i, reason: 'dangerous recursive permission change' },
-  { pattern: /\b(curl|wget)[^|]*(\|\s*(sh|bash|zsh))\b/i, reason: 'remote script piped directly to shell' },
 ];
 
 const ASK_PATTERNS = [
@@ -22,6 +21,41 @@ export function classifyBashCommand(command = '') {
   if (!normalized) {
     return { decision: 'allow', severity: 'low', reason: 'empty command', matchedPattern: null };
   }
+  const parsed = parseBashCommand(normalized);
+
+  for (const cmd of parsed.commands) {
+    if (cmd.name === 'rm' && cmd.args.includes('-rf') && cmd.args.includes('/')) {
+      return {
+        decision: 'deny',
+        severity: 'high',
+        reason: 'recursive delete of filesystem root',
+        matchedPattern: 'rm -rf /',
+        parsed,
+      };
+    }
+    if ((cmd.name === 'chmod' && cmd.args.includes('-R') && cmd.args.includes('777'))
+      || (cmd.name === 'chown' && cmd.args.includes('-R') && cmd.args.includes('root'))) {
+      return {
+        decision: 'deny',
+        severity: 'high',
+        reason: 'dangerous recursive permission change',
+        matchedPattern: cmd.name,
+        parsed,
+      };
+    }
+  }
+
+  const hasCurlOrWget = parsed.commands.some((cmd) => ['curl', 'wget'].includes(cmd.name));
+  const hasShellAfterPipe = parsed.commands.some((cmd) => ['sh', 'bash', 'zsh'].includes(cmd.name));
+  if (normalized.includes('|') && hasCurlOrWget && hasShellAfterPipe) {
+    return {
+      decision: 'deny',
+      severity: 'high',
+      reason: 'remote script piped directly to shell',
+      matchedPattern: 'curl|wget -> shell',
+      parsed,
+    };
+  }
 
   for (const entry of DENY_PATTERNS) {
     if (entry.pattern.test(normalized)) {
@@ -30,6 +64,37 @@ export function classifyBashCommand(command = '') {
         severity: 'high',
         reason: entry.reason,
         matchedPattern: entry.pattern.source,
+        parsed,
+      };
+    }
+  }
+
+  for (const cmd of parsed.commands) {
+    if (cmd.name === 'git' && cmd.args[0] === 'push') {
+      return {
+        decision: 'ask',
+        severity: 'medium',
+        reason: 'git push changes a remote repository',
+        matchedPattern: 'git push',
+        parsed,
+      };
+    }
+    if (['scp', 'ssh'].includes(cmd.name)) {
+      return {
+        decision: 'ask',
+        severity: 'medium',
+        reason: 'remote shell or file transfer operation',
+        matchedPattern: cmd.name,
+        parsed,
+      };
+    }
+    if (cmd.name === 'chmod') {
+      return {
+        decision: 'ask',
+        severity: 'medium',
+        reason: 'permission-changing command',
+        matchedPattern: 'chmod',
+        parsed,
       };
     }
   }
@@ -41,6 +106,7 @@ export function classifyBashCommand(command = '') {
         severity: 'medium',
         reason: entry.reason,
         matchedPattern: entry.pattern.source,
+        parsed,
       };
     }
   }
@@ -50,5 +116,6 @@ export function classifyBashCommand(command = '') {
     severity: 'low',
     reason: 'command not classified as dangerous',
     matchedPattern: null,
+    parsed,
   };
 }

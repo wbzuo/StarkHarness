@@ -1,6 +1,12 @@
 import { appendFile, mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
+async function loadJsonFile(filePath, fallback) {
+  const content = await readFile(filePath, 'utf8').catch(() => '');
+  if (!content.trim()) return fallback;
+  return JSON.parse(content);
+}
+
 export class StateStore {
   constructor({ rootDir }) {
     this.rootDir = rootDir;
@@ -10,6 +16,10 @@ export class StateStore {
     this.todosPath = path.join(rootDir, 'todos.json');
     this.authProfilesPath = path.join(rootDir, 'auth-profiles.json');
     this.cronsPath = path.join(rootDir, 'crons.json');
+    this.dreamStatePath = path.join(rootDir, 'dream.json');
+    this.managedSettingsPath = path.join(rootDir, 'managed-settings.json');
+    this.trustedPluginsPath = path.join(rootDir, 'trusted-plugins.json');
+    this.swarmSessionsPath = path.join(rootDir, 'swarm-sessions.json');
   }
 
   async init() {
@@ -147,13 +157,11 @@ export class StateStore {
   }
 
   async loadTodos() {
-    const content = await readFile(this.todosPath, 'utf8').catch(() => '[]');
-    return JSON.parse(content);
+    return loadJsonFile(this.todosPath, []);
   }
 
   async loadAuthProfiles() {
-    const content = await readFile(this.authProfilesPath, 'utf8').catch(() => '{}');
-    return JSON.parse(content);
+    return loadJsonFile(this.authProfilesPath, {});
   }
 
   async saveAuthProfile(provider, profile) {
@@ -175,12 +183,64 @@ export class StateStore {
   }
 
   async loadCrons() {
-    const content = await readFile(this.cronsPath, 'utf8').catch(() => '[]');
-    return JSON.parse(content);
+    return loadJsonFile(this.cronsPath, []);
   }
 
   async saveCrons(crons) {
     await writeFile(this.cronsPath, JSON.stringify(crons, null, 2), 'utf8');
     return this.cronsPath;
+  }
+
+  async loadManagedSettings() {
+    return loadJsonFile(this.managedSettingsPath, {
+      settings: {},
+      updatedAt: null,
+      source: null,
+    });
+  }
+
+  async saveManagedSettings(settings) {
+    const payload = {
+      settings: settings?.settings ?? settings ?? {},
+      updatedAt: settings?.updatedAt ?? new Date().toISOString(),
+      source: settings?.source ?? null,
+    };
+    await writeFile(this.managedSettingsPath, JSON.stringify(payload, null, 2), 'utf8');
+    return this.managedSettingsPath;
+  }
+
+  async loadTrustedPlugins() {
+    return loadJsonFile(this.trustedPluginsPath, []);
+  }
+
+  async saveTrustedPlugins(entries) {
+    await writeFile(this.trustedPluginsPath, JSON.stringify(entries ?? [], null, 2), 'utf8');
+    return this.trustedPluginsPath;
+  }
+
+  async loadSwarmSessions() {
+    return loadJsonFile(this.swarmSessionsPath, []);
+  }
+
+  async saveSwarmSessions(entries) {
+    await writeFile(this.swarmSessionsPath, JSON.stringify(entries ?? [], null, 2), 'utf8');
+    return this.swarmSessionsPath;
+  }
+
+  async loadDreamState() {
+    return loadJsonFile(this.dreamStatePath, {
+      running: false,
+      intervalMs: null,
+      ticks: 0,
+      lastRunAt: null,
+      lastError: null,
+      lastTranscriptCount: 0,
+      lastEntries: [],
+    });
+  }
+
+  async saveDreamState(state) {
+    await writeFile(this.dreamStatePath, JSON.stringify(state ?? {}, null, 2), 'utf8');
+    return this.dreamStatePath;
   }
 }

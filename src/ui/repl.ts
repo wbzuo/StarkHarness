@@ -9,6 +9,7 @@ export function createReplBlueprint() {
   return {
     mode: 'readline',
     status: 'ready',
+    tui: 'ready',
   };
 }
 

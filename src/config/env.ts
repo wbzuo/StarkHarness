@@ -80,6 +80,10 @@ export async function loadRuntimeEnv({ cwd = process.cwd(), envFilePath = null, 
       authToken: raw.STARKHARNESS_BRIDGE_TOKEN ?? null,
       tokenProfiles: parseJson(raw.STARKHARNESS_TOKEN_PROFILES, {}),
       remoteControl: parseBoolean(raw.STARKHARNESS_REMOTE_CONTROL, true),
+      remoteBridgeUrl: raw.STARKHARNESS_REMOTE_BRIDGE_URL ?? null,
+      remoteBridgeToken: raw.STARKHARNESS_REMOTE_BRIDGE_TOKEN ?? null,
+      remoteBridgeClientId: raw.STARKHARNESS_REMOTE_BRIDGE_CLIENT_ID ?? null,
+      remoteBridgePollMs: parseNumber(raw.STARKHARNESS_REMOTE_BRIDGE_POLL_MS, 5000),
     },
     webAccess: {
       enabled: parseBoolean(raw.STARKHARNESS_FEATURE_WEB_ACCESS, true),
@@ -99,6 +103,11 @@ export async function loadRuntimeEnv({ cwd = process.cwd(), envFilePath = null, 
       apiKey: raw.STARKHARNESS_VOICE_API_KEY ?? null,
       model: raw.STARKHARNESS_VOICE_MODEL ?? null,
     },
+    dream: {
+      enabled: parseBoolean(raw.STARKHARNESS_AUTO_DREAM, false),
+      schedule: raw.STARKHARNESS_DREAM_SCHEDULE ?? '@every:15m',
+      pollIntervalMs: parseNumber(raw.STARKHARNESS_CRON_INTERVAL_MS, 60000),
+    },
     features: {
       webAccess: parseBoolean(raw.STARKHARNESS_FEATURE_WEB_ACCESS, true),
       remoteControl: parseBoolean(raw.STARKHARNESS_REMOTE_CONTROL, true),
@@ -106,6 +115,7 @@ export async function loadRuntimeEnv({ cwd = process.cwd(), envFilePath = null, 
       autoUpdate: parseBoolean(raw.STARKHARNESS_AUTO_UPDATE, false),
       debug: parseBoolean(raw.STARKHARNESS_DEBUG, false),
       voice: parseBoolean(raw.STARKHARNESS_VOICE_ENABLED, true),
+      autoDream: parseBoolean(raw.STARKHARNESS_AUTO_DREAM, false),
     },
     telemetry: {
       monitoringUrl: raw.STARKHARNESS_MONITORING_URL ?? null,
@@ -117,6 +127,12 @@ export async function loadRuntimeEnv({ cwd = process.cwd(), envFilePath = null, 
     },
     plugins: {
       registryUrl: raw.STARKHARNESS_PLUGIN_REGISTRY_URL ?? null,
+      autoUpdate: parseBoolean(raw.STARKHARNESS_PLUGIN_AUTOUPDATE, false),
+    },
+    settings: {
+      managedUrl: raw.STARKHARNESS_MANAGED_SETTINGS_URL ?? null,
+      managedToken: raw.STARKHARNESS_MANAGED_SETTINGS_TOKEN ?? null,
+      autoSync: parseBoolean(raw.STARKHARNESS_MANAGED_SETTINGS_AUTO_SYNC, false),
     },
   };
 }

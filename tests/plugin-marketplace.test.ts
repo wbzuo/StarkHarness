@@ -67,6 +67,79 @@ test('plugin-install writes a plugin manifest and plugin-uninstall removes it', 
   await runtime.shutdown();
 });
 
+test('plugin-trust and plugin-autoupdate refresh trusted plugin manifests from the registry', async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'starkharness-plugin-autoupdate-'));
+  const server = createServer((req, res) => {
+    if (req.url === '/registry') {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify([{
+        name: 'trusted-pack',
+        version: '2.0.0',
+        manifestUrl: 'http://127.0.0.1:1/placeholder',
+      }]));
+      return;
+    }
+    if (req.url === '/manifest') {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({
+        name: 'trusted-pack',
+        version: '2.0.0',
+        commands: [{ name: 'trusted-pack-review', description: 'Updated review command' }],
+      }));
+      return;
+    }
+    res.writeHead(404);
+    res.end();
+  });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const port = server.address().port;
+  const baseUrl = `http://127.0.0.1:${port}`;
+  const originalFetch = global.fetch;
+
+  try {
+    const envConfig = await loadRuntimeEnv({
+      cwd: root,
+      env: { ...process.env, STARKHARNESS_PLUGIN_REGISTRY_URL: `${baseUrl}/registry` },
+    });
+    const runtime = await createRuntime({
+      stateDir: path.join(root, '.starkharness'),
+      session: { cwd: root, goal: 'plugin-autoupdate' },
+      envConfig,
+    });
+    global.fetch = async (input, init) => {
+      const url = String(input);
+      if (url === `${baseUrl}/registry`) {
+        const response = await originalFetch(url, init);
+        const payload = await response.json();
+        payload[0].manifestUrl = `${baseUrl}/manifest`;
+        return new Response(JSON.stringify(payload), {
+          status: response.status,
+          headers: response.headers,
+        });
+      }
+      return originalFetch(input, init);
+    };
+
+    await runtime.dispatchCommand('plugin-install', {
+      manifest: JSON.stringify({
+        name: 'trusted-pack',
+        version: '1.0.0',
+        commands: [{ name: 'trusted-pack-review', description: 'Old review command' }],
+      }),
+    });
+    const trusted = await runtime.dispatchCommand('plugin-trust', { name: 'trusted-pack' });
+    assert.ok(trusted.includes('trusted-pack'));
+
+    const result = await runtime.dispatchCommand('plugin-autoupdate');
+    assert.equal(result.updates.length, 1);
+    assert.ok(runtime.plugins.list().some((plugin) => plugin.name === 'trusted-pack'));
+    await runtime.shutdown();
+  } finally {
+    global.fetch = originalFetch;
+    await new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve(undefined)));
+  }
+});
+
 test('runtime loads plugin manifests from app plugins directory', async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), 'starkharness-plugin-dir-'));
   await writeFile(path.join(root, 'starkharness.app.json'), JSON.stringify({

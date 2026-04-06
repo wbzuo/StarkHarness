@@ -20,6 +20,7 @@ import { createBuiltinTools } from '../tools/builtins/index.js';
 import { createCapabilityMap } from '../capabilities/index.js';
 import { createCommandRegistry, CommandRegistry } from '../commands/registry.js';
 import { createWorkspaceBlueprint } from '../workspace/index.js';
+import { FileStateCache } from '../workspace/cache.js';
 import { createBridgeBlueprint } from '../bridge/index.js';
 import { createReplBlueprint } from '../ui/repl.js';
 import { createTelemetrySink, TraceContext } from '../telemetry/index.js';
@@ -35,12 +36,22 @@ import { describeWebAccess } from '../web-access/index.js';
 import { describeVoice } from '../voice/index.js';
 import { createObservabilityManager } from '../enterprise/observability.js';
 import { createFeatureFlagManager } from '../enterprise/growthbook.js';
+import { mergeManagedSettingsIntoEnv, fetchManagedSettings } from '../config/managed.js';
+import { describeRemoteBridge, emitRemoteBridgeEvent, pollRemoteBridge, startRemoteBridge, stopRemoteBridge } from '../bridge/remote.js';
 
 const COORDINATOR_ALLOWED_TOOLS = new Set([
   'spawn_agent',
   'send_message',
   'tasks',
 ]);
+
+function parseEverySchedule(schedule = '') {
+  const match = String(schedule).trim().match(/^@every:(\d+)(ms|s|m|h)$/);
+  if (!match) return null;
+  const value = Number(match[1]);
+  const unit = match[2];
+  return value * { ms: 1, s: 1000, m: 60_000, h: 3_600_000 }[unit];
+}
 
 function createSnapshot(runtime) {
   return {
@@ -65,13 +76,16 @@ export async function createRuntime(options = {}) {
   const runtimeSnapshot = options.resumeSessionId
     ? await state.loadRuntimeSnapshot().catch(() => ({ tasks: [], agents: [], inbox: {}, permissions: {}, plugins: [] }))
     : { tasks: [], agents: [], inbox: {}, permissions: {}, plugins: [] };
-  const envConfig = options.envConfig ?? {
+  const baseEnvConfig = options.envConfig ?? {
     raw: process.env,
     providers: {},
     bridge: {},
     features: {},
     telemetry: {},
   };
+  const managedSettingsRecord = await state.loadManagedSettings().catch(() => ({}));
+  const managedSettings = managedSettingsRecord?.settings ?? managedSettingsRecord ?? {};
+  const envConfig = mergeManagedSettingsIntoEnv(baseEnvConfig, managedSettings);
   const authProfiles = await state.loadAuthProfiles().catch(() => ({}));
   const filePolicy = await loadPolicyFile(options.policyPath ?? options.app?.paths?.policyPath, { includeDefaults: false });
   const loadedProviderConfig = await loadProviderConfig(options.providerConfigPath ?? options.app?.paths?.providerConfigPath);
@@ -92,6 +106,7 @@ export async function createRuntime(options = {}) {
   const providers = new ProviderRegistry(providerConfig);
   const tools = new ToolRegistry();
   const promptBuilder = new SystemPromptBuilder();
+  const fileCache = new FileStateCache();
 
   for (const provider of createProviderBlueprint(providerConfig)) {
     providers.register(provider);
@@ -258,6 +273,7 @@ export async function createRuntime(options = {}) {
     skills,
     runner,
     promptBuilder,
+    fileCache,
     capabilities: createCapabilityMap(),
     workspace: createWorkspaceBlueprint(),
     bridge: createBridgeBlueprint(),
@@ -266,6 +282,7 @@ export async function createRuntime(options = {}) {
     voice,
     app: options.app ?? null,
     env: envConfig,
+    managedSettings,
     observability,
     featureFlags,
     scheduler,
@@ -274,6 +291,15 @@ export async function createRuntime(options = {}) {
     requestPermission: options.requestPermission ?? null,
     askUserQuestion: options.askUserQuestion ?? null,
     replSessions: new Map(),
+    remoteBridgeState: {
+      connected: false,
+      lastPollAt: null,
+      lastCommandAt: null,
+      lastError: null,
+    },
+    remoteBridgeTimer: null,
+    remoteBridgeSocket: null,
+    backgroundTimer: null,
     async persist() {
       await this.state.saveSession(this.session);
       await this.state.saveRuntimeSnapshot(createSnapshot(this));
@@ -286,14 +312,16 @@ export async function createRuntime(options = {}) {
     async log(eventName, payload) {
       const event = await this.telemetry.emit(eventName, payload, this.trace);
       await this.observability.report(eventName, payload);
+      emitRemoteBridgeEvent(this, { eventName, payload, traceId: this.trace?.traceId ?? null });
       return event;
     },
     async reloadEnvAndProviders() {
       const { loadRuntimeEnv } = await import('../config/env.js');
-      const nextEnv = await loadRuntimeEnv({
+      const loadedEnv = await loadRuntimeEnv({
         cwd: this.app?.rootDir ?? this.context.cwd,
         envFilePath: this.app?.paths?.envPath ?? null,
       });
+      const nextEnv = mergeManagedSettingsIntoEnv(loadedEnv, this.managedSettings);
       this.env = nextEnv;
       reloadProviders(mergeProviderConfig(
         mergeProviderConfig(loadedProviderConfig, nextEnv.providers),
@@ -304,6 +332,119 @@ export async function createRuntime(options = {}) {
       this.observability = createObservabilityManager(nextEnv.telemetry);
       this.featureFlags = createFeatureFlagManager(nextEnv.telemetry);
       return nextEnv;
+    },
+    async applyManagedSettings(settings = {}) {
+      this.managedSettings = settings;
+      await this.state.saveManagedSettings(settings);
+      const nextEnv = mergeManagedSettingsIntoEnv(this.env, settings);
+      this.env = nextEnv;
+      reloadProviders(mergeProviderConfig(
+        mergeProviderConfig(loadedProviderConfig, nextEnv.providers),
+        options.providerConfig ?? {},
+      ));
+      this.webAccess = await describeWebAccess({ cwd: this.context.cwd, env: nextEnv.raw });
+      this.voice = describeVoice(nextEnv);
+      this.observability = createObservabilityManager(nextEnv.telemetry);
+      this.featureFlags = createFeatureFlagManager(nextEnv.telemetry);
+      return settings;
+    },
+    async syncManagedSettings() {
+      const settings = await fetchManagedSettings({
+        url: this.env?.settings?.managedUrl,
+        token: this.env?.settings?.managedToken,
+      });
+      await this.applyManagedSettings(settings);
+      return settings;
+    },
+    async tickBackgroundJobs() {
+      const crons = await this.state.loadCrons();
+      let changed = false;
+      if (this.env?.features?.autoDream && !crons.some((entry) => entry.id === 'dream-auto')) {
+        crons.push({
+          id: 'dream-auto',
+          schedule: this.env?.dream?.schedule ?? '@every:15m',
+          command: 'dream',
+          enabled: true,
+          kind: 'dream',
+          createdAt: new Date().toISOString(),
+        });
+        changed = true;
+      }
+      const now = new Date();
+      for (const entry of crons) {
+        if (!entry.enabled) continue;
+        if ((entry.kind ?? '') !== 'dream' && (entry.command ?? '') !== 'dream') continue;
+        if (!this.isCronDue(entry, now)) continue;
+        const result = await this.dispatchCommand('dream', { sessionId: entry.sessionId ?? this.session.id, background: true });
+        entry.lastRunAt = now.toISOString();
+        entry.lastResult = {
+          entries: result.entries?.length ?? 0,
+          path: result.path ?? null,
+        };
+        changed = true;
+      }
+      if (changed) await this.state.saveCrons(crons);
+      if (this.env?.settings?.managedUrl && this.env?.settings?.autoSync) {
+        await this.syncManagedSettings().catch((error) => {
+          this.remoteBridgeState.lastError = error instanceof Error ? error.message : String(error);
+        });
+      }
+      if (this.remoteBridgeState.connected) {
+        await pollRemoteBridge(this).catch((error) => {
+          this.remoteBridgeState.lastError = error instanceof Error ? error.message : String(error);
+        });
+      }
+    },
+    startBackgroundJobs() {
+      if (this.backgroundTimer) return;
+      this.backgroundTimer = setInterval(() => {
+        this.tickBackgroundJobs().catch(() => {});
+      }, Number(this.env?.dream?.pollIntervalMs ?? 1000));
+      this.backgroundTimer.unref?.();
+    },
+    stopBackgroundJobs() {
+      if (this.backgroundTimer) {
+        clearInterval(this.backgroundTimer);
+        this.backgroundTimer = null;
+      }
+    },
+    isCronDue(entry, now = new Date()) {
+      const schedule = String(entry.schedule ?? '* * * * *').trim();
+      const everyMs = parseEverySchedule(schedule);
+      if (everyMs) {
+        const lastRunMs = entry.lastRunAt ? Date.parse(entry.lastRunAt) : 0;
+        return !lastRunMs || (now.getTime() - lastRunMs) >= everyMs;
+      }
+      const [minute = '*', hour = '*', day = '*', month = '*', weekday = '*'] = schedule.split(/\s+/);
+      const lastRun = entry.lastRunAt ? new Date(entry.lastRunAt) : null;
+      if (lastRun && lastRun.getUTCFullYear() === now.getUTCFullYear() && lastRun.getUTCMonth() === now.getUTCMonth() && lastRun.getUTCDate() === now.getUTCDate() && lastRun.getUTCHours() === now.getUTCHours() && lastRun.getUTCMinutes() === now.getUTCMinutes()) {
+        return false;
+      }
+      const matchesPart = (part, value) => {
+        if (part === '*') return true;
+        if (part.startsWith('*/')) {
+          const interval = Number(part.slice(2));
+          return interval > 0 && value % interval === 0;
+        }
+        return part.split(',').map((item) => Number(item)).includes(value);
+      };
+      return matchesPart(minute, now.getUTCMinutes())
+        && matchesPart(hour, now.getUTCHours())
+        && matchesPart(day, now.getUTCDate())
+        && matchesPart(month, now.getUTCMonth() + 1)
+        && matchesPart(weekday, now.getUTCDay());
+    },
+    describeRemoteBridge() {
+      return describeRemoteBridge(this.env, this.remoteBridgeState);
+    },
+    startRemoteBridge() {
+      return startRemoteBridge(this);
+    },
+    stopRemoteBridge() {
+      return stopRemoteBridge(this);
+    },
+    async pollRemoteBridge() {
+      return pollRemoteBridge(this);
     },
     async dispatchTurn(turn, options = {}) {
       await this.log('turn:start', turn);
@@ -479,6 +620,8 @@ export async function createRuntime(options = {}) {
       return this.featureFlags.sync();
     },
     async shutdown() {
+      this.stopBackgroundJobs();
+      this.stopRemoteBridge();
       const workerIds = this.orchestrator.listWorkers().map((worker) => worker.agentId);
       await Promise.all(workerIds.map((agentId) => this.orchestrator.stopWorker(agentId)));
       await this.hooks.fire('SessionEnd', { sessionId: this.session.id, cwd: this.session.cwd });
@@ -490,6 +633,7 @@ export async function createRuntime(options = {}) {
         mcpClients: this.mcpClients.size,
         workers: workerIds.length,
         clearedPending: clearedPending.length,
+        fileCache: this.fileCache.status(),
       });
     },
   };
@@ -498,6 +642,10 @@ export async function createRuntime(options = {}) {
   runtime.orchestrator = new AgentOrchestrator({ agents, tasks, scheduler, executor: runtime.executor, inbox, state, telemetry });
   loop.setRuntime(runtime);
   runner.setRuntime(runtime);
+  if (runtime.env?.bridge?.remoteBridgeUrl) {
+    runtime.startRemoteBridge();
+  }
+  runtime.startBackgroundJobs();
   await runtime.persist();
   await runtime.log('runtime:boot', { sessionId: runtime.session.id, stateDir, resumed: Boolean(options.resumeSessionId) });
   return runtime;
@@ -513,6 +661,7 @@ export function createBlueprintDocument(runtime) {
     tools: runtime.tools.list().map(({ name, capability, description }) => ({ name, capability, description })),
     capabilities: runtime.capabilities,
     workspace: runtime.workspace,
+    fileCache: runtime.fileCache.status(),
     bridge: runtime.bridge,
     ui: runtime.ui,
     webAccess: runtime.webAccess,
@@ -554,6 +703,7 @@ export function createBlueprintDocument(runtime) {
       sessionPath: runtime.state.getSessionPath(runtime.session.id),
       runtimePath: runtime.state.runtimePath,
       transcriptPath: runtime.telemetry.transcriptPath,
+      fileCache: runtime.fileCache?.status?.() ?? null,
     },
   };
 }

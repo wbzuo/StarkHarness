@@ -13,6 +13,9 @@ import { generatePkcePair, buildAuthorizationUrl } from '../oauth/pkce.js';
 import { exchangeAuthorizationCode, refreshAccessToken, waitForOAuthCode } from '../oauth/client.js';
 import { webSearch } from '../search/web.js';
 import { describeVoice, transcribeAudio } from '../voice/index.js';
+import { packagePluginAsDxt, validateDxtPackage, installDxtPackage } from '../plugins/dxt.js';
+import { startTui } from '../ui/tui.js';
+import { launchTmuxSwarm, listTmuxSwarms, stopTmuxSwarm } from '../swarm/tmux.js';
 import { writeFile, rm } from 'node:fs/promises';
 
 const execFileAsync = promisify(execFile);
@@ -87,6 +90,11 @@ function createStatusSummary(runtime) {
     },
     voice: runtime.voice ?? describeVoice(runtime.env),
     bridge: runtime.env?.bridge ?? {},
+    remoteBridge: runtime.describeRemoteBridge?.() ?? null,
+    managedSettings: {
+      configured: Boolean(runtime.env?.settings?.managedUrl),
+      keys: Object.keys(runtime.managedSettings ?? {}),
+    },
     observability: runtime.observability?.status?.() ?? null,
     workers: {
       active: runtime.listWorkers().length,
@@ -101,6 +109,7 @@ function createStatusSummary(runtime) {
       plugins: runtime.plugins.list().length,
     },
     swarms,
+    fileCache: runtime.fileCache?.status?.() ?? null,
   };
 }
 
@@ -119,6 +128,17 @@ function parseJsonArgument(value, fallback = null) {
   } catch {
     return fallback;
   }
+}
+
+function compareVersions(left = '0.0.0', right = '0.0.0') {
+  const leftParts = String(left).split('.').map((part) => Number(part) || 0);
+  const rightParts = String(right).split('.').map((part) => Number(part) || 0);
+  const length = Math.max(leftParts.length, rightParts.length);
+  for (let index = 0; index < length; index += 1) {
+    const delta = (leftParts[index] ?? 0) - (rightParts[index] ?? 0);
+    if (delta !== 0) return delta;
+  }
+  return 0;
 }
 
 function normalizeSwarmTasks(args = {}) {
@@ -280,6 +300,78 @@ export function createCommandRegistry() {
       },
     },
     {
+      name: 'file-cache-status',
+      description: 'Show workspace file-cache statistics',
+      async execute(runtime) {
+        return runtime.fileCache?.status?.() ?? null;
+      },
+    },
+    {
+      name: 'file-cache-clear',
+      description: 'Clear the workspace file state cache',
+      async execute(runtime) {
+        runtime.fileCache?.clear?.();
+        return runtime.fileCache?.status?.() ?? null;
+      },
+    },
+    {
+      name: 'settings-status',
+      description: 'Show managed settings configuration and persisted snapshot summary',
+      async execute(runtime) {
+        const snapshotRecord = await runtime.state.loadManagedSettings();
+        const snapshot = snapshotRecord?.settings ?? snapshotRecord ?? {};
+        return {
+          configured: Boolean(runtime.env?.settings?.managedUrl),
+          url: runtime.env?.settings?.managedUrl ?? null,
+          autoSync: runtime.env?.settings?.autoSync ?? false,
+          keys: Object.keys(snapshot ?? {}),
+          updatedAt: snapshotRecord?.updatedAt ?? null,
+          source: snapshotRecord?.source ?? null,
+          snapshot,
+        };
+      },
+    },
+    {
+      name: 'settings-sync',
+      description: 'Fetch and apply managed settings from the configured remote endpoint',
+      async execute(runtime) {
+        const snapshot = await runtime.syncManagedSettings();
+        return {
+          ok: true,
+          keys: Object.keys(snapshot ?? {}),
+          snapshot,
+        };
+      },
+    },
+    {
+      name: 'remote-status',
+      description: 'Show remote bridge client status',
+      async execute(runtime) {
+        return runtime.describeRemoteBridge?.() ?? null;
+      },
+    },
+    {
+      name: 'remote-connect',
+      description: 'Start the remote bridge polling client',
+      async execute(runtime) {
+        return runtime.startRemoteBridge?.();
+      },
+    },
+    {
+      name: 'remote-disconnect',
+      description: 'Stop the remote bridge polling client',
+      async execute(runtime) {
+        return runtime.stopRemoteBridge?.();
+      },
+    },
+    {
+      name: 'remote-poll',
+      description: 'Poll the remote bridge endpoint once and execute any returned payload',
+      async execute(runtime) {
+        return runtime.pollRemoteBridge?.();
+      },
+    },
+    {
       name: 'voice-status',
       description: 'Show configured voice/transcription provider status',
       async execute(runtime) {
@@ -424,6 +516,99 @@ export function createCommandRegistry() {
           agents: runtime.agents.list().filter((agent) => agent.swarmId === args.id),
           tasks: runtime.tasks.list().filter((task) => task.swarmId === args.id),
         };
+      },
+    },
+    {
+      name: 'swarm-terminal-start',
+      description: 'Launch a tmux-backed multi-terminal swarm session',
+      async execute(runtime, args = {}) {
+        const tasks = normalizeSwarmTasks(args).map((task) => ({
+          prompt: task.description,
+          command: task.command ?? null,
+        }));
+        const result = await launchTmuxSwarm({
+          id: args.id ?? `terminal-${Date.now().toString(36)}`,
+          cwd: runtime.context.cwd,
+          tasks,
+        });
+        const current = await runtime.state.loadSwarmSessions();
+        const next = [...current.filter((entry) => entry.sessionName !== result.sessionName), {
+          ...result,
+          type: 'tmux',
+          cwd: runtime.context.cwd,
+          createdAt: new Date().toISOString(),
+        }];
+        await runtime.state.saveSwarmSessions(next);
+        return result;
+      },
+    },
+    {
+      name: 'swarm-terminal-status',
+      description: 'Show tracked tmux swarm sessions and live tmux discovery',
+      async execute(runtime) {
+        return {
+          persisted: await runtime.state.loadSwarmSessions(),
+          live: await listTmuxSwarms(),
+        };
+      },
+    },
+    {
+      name: 'swarm-terminal-stop',
+      description: 'Stop a tmux-backed swarm session',
+      async execute(runtime, args = {}) {
+        if (!args.id) throw new Error('swarm-terminal-stop requires --id');
+        const result = await stopTmuxSwarm({ id: args.id });
+        const current = await runtime.state.loadSwarmSessions();
+        await runtime.state.saveSwarmSessions(current.filter((entry) => entry.sessionName !== result.sessionName));
+        return result;
+      },
+    },
+    {
+      name: 'swarm-launch',
+      description: 'Launch a multi-terminal swarm through tmux',
+      async execute(runtime, args = {}) {
+        const sessionName = args.session ?? args.id ?? `starkharness-${Date.now().toString(36)}`;
+        const tasks = normalizeSwarmTasks(args).map((task) => task.description);
+        if (tasks.length === 0) throw new Error('swarm-launch requires --goal, --prompt, --tasks, or --tasksJson');
+        const cliPath = `node --import tsx ${path.resolve(runtime.context.cwd, 'src/main.ts')}`;
+        const result = await launchTmuxSwarm({
+          sessionName,
+          cwd: runtime.context.cwd,
+          cliPath,
+          prompts: tasks,
+        });
+        const entries = await runtime.state.loadSwarmSessions();
+        const next = [...entries.filter((entry) => entry.sessionName !== sessionName), {
+          backend: 'tmux',
+          sessionName,
+          cwd: runtime.context.cwd,
+          prompts: tasks,
+          createdAt: new Date().toISOString(),
+        }];
+        await runtime.state.saveSwarmSessions(next);
+        return result;
+      },
+    },
+    {
+      name: 'swarm-list',
+      description: 'List persisted and live multi-terminal swarm sessions',
+      async execute(runtime) {
+        return {
+          persisted: await runtime.state.loadSwarmSessions(),
+          live: await listTmuxSwarms(),
+        };
+      },
+    },
+    {
+      name: 'swarm-stop',
+      description: 'Stop a multi-terminal swarm session',
+      async execute(runtime, args = {}) {
+        const sessionName = args.session ?? args.id;
+        if (!sessionName) throw new Error('swarm-stop requires --session or --id');
+        const result = await stopTmuxSwarm(sessionName);
+        const entries = await runtime.state.loadSwarmSessions();
+        await runtime.state.saveSwarmSessions(entries.filter((entry) => entry.sessionName !== sessionName));
+        return result;
       },
     },
     {
@@ -754,7 +939,14 @@ export function createCommandRegistry() {
         const pluginsDir = runtime.app?.paths?.pluginsDir ?? path.join(runtime.context.cwd, 'plugins');
         await mkdir(pluginsDir, { recursive: true });
         let manifest;
-        if (args.url) {
+        if (args.dxt) {
+          const installed = await installDxtPackage({
+            filePath: path.resolve(runtime.context.cwd, args.dxt),
+            targetDir: pluginsDir,
+          });
+          runtime.plugins.register(installed.manifest);
+          return installed;
+        } else if (args.url) {
           const response = await fetch(args.url);
           if (!response.ok) throw new Error(`plugin download failed: ${response.status}`);
           manifest = await response.json();
@@ -770,6 +962,80 @@ export function createCommandRegistry() {
           ok: true,
           filePath,
           plugin: manifest.name,
+        };
+      },
+    },
+    {
+      name: 'plugin-package-dxt',
+      description: 'Package a plugin manifest as a DXT-compatible zip archive',
+      async execute(runtime, args = {}) {
+        const manifestPath = path.resolve(runtime.context.cwd, args.path ?? args.manifestPath ?? 'plugin.json');
+        const result = await packagePluginAsDxt({
+          manifestPath,
+          outputPath: args.output ? path.resolve(runtime.context.cwd, args.output) : null,
+          include: Array.isArray(args.include) ? args.include : parseListArgument(args.include),
+        });
+        return {
+          ...result,
+          outputPath: result.filePath,
+        };
+      },
+    },
+    {
+      name: 'plugin-validate-dxt',
+      description: 'Validate a DXT-compatible plugin archive',
+      async execute(runtime, args = {}) {
+        const source = args.path ?? args.packagePath ?? args.filePath;
+        if (!source) throw new Error('plugin-validate-dxt requires --path');
+        const packagePath = path.resolve(runtime.context.cwd, source);
+        return validateDxtPackage(packagePath);
+      },
+    },
+    {
+      name: 'plugin-trust-list',
+      description: 'List trusted plugins for DXT install/update flows',
+      async execute(runtime) {
+        return runtime.state.loadTrustedPlugins();
+      },
+    },
+    {
+      name: 'plugin-trust',
+      description: 'Mark a plugin as trusted for install and update flows',
+      async execute(runtime, args = {}) {
+        const entries = await runtime.state.loadTrustedPlugins();
+        const next = [...new Set([...entries, args.name].filter(Boolean))];
+        await runtime.state.saveTrustedPlugins(next);
+        return next;
+      },
+    },
+    {
+      name: 'plugin-autoupdate',
+      description: 'Best-effort plugin autoupdate using the configured registry and trusted plugin list',
+      async execute(runtime) {
+        const trusted = new Set(await runtime.state.loadTrustedPlugins());
+        const registry = await runtime.dispatchCommand('plugin-marketplace-list');
+        const updates = [];
+        for (const plugin of runtime.plugins.list()) {
+          if (!trusted.has(plugin.name)) continue;
+          const remote = registry.find((entry) => entry.name === plugin.name);
+          if (!remote || !remote.version || remote.version === plugin.version) continue;
+          if (remote.dxtUrl) {
+            const target = path.join(runtime.state.rootDir, `${plugin.name}-${remote.version}.dxt.zip`);
+            const response = await fetch(remote.dxtUrl);
+            if (!response.ok) continue;
+            const buffer = Buffer.from(await response.arrayBuffer());
+            await writeFile(target, buffer);
+            updates.push(await runtime.dispatchCommand('plugin-install', { dxt: target }));
+            continue;
+          }
+          if (remote.manifestUrl) {
+            updates.push(await runtime.dispatchCommand('plugin-install', { url: remote.manifestUrl }));
+          }
+        }
+        return {
+          ok: true,
+          trusted: [...trusted],
+          updates,
         };
       },
     },
@@ -898,6 +1164,20 @@ export function createCommandRegistry() {
       async execute(runtime) {
         const { startRepl } = await import('../ui/repl.js');
         return startRepl(runtime);
+      },
+    },
+    {
+      name: 'tui',
+      description: 'Start the rich terminal dashboard UI',
+      async execute(runtime) {
+        return startTui(runtime);
+      },
+    },
+    {
+      name: 'tui',
+      description: 'Start the dependency-free terminal dashboard',
+      async execute(runtime) {
+        return startTui(runtime);
       },
     },
     {
@@ -1032,6 +1312,104 @@ export function createCommandRegistry() {
       },
     },
     {
+      name: 'dream-status',
+      description: 'Show dream/cron background consolidation status',
+      async execute(runtime) {
+        const crons = await runtime.state.loadCrons();
+        return {
+          enabled: runtime.env?.features?.autoDream ?? false,
+          schedule: runtime.env?.dream?.schedule ?? null,
+          pollIntervalMs: runtime.env?.dream?.pollIntervalMs ?? null,
+          background: runtime.backgroundTimer != null,
+          entries: crons.filter((entry) => (entry.kind ?? '') === 'dream' || (entry.command ?? '') === 'dream'),
+        };
+      },
+    },
+    {
+      name: 'dream-enable-auto',
+      description: 'Enable background dream consolidation on a schedule',
+      async execute(runtime, args = {}) {
+        const crons = await runtime.state.loadCrons();
+        const entry = {
+          id: 'dream-auto',
+          schedule: args.schedule ?? runtime.env?.dream?.schedule ?? '@every:15m',
+          command: 'dream',
+          enabled: args.enabled !== 'false',
+          kind: 'dream',
+          createdAt: new Date().toISOString(),
+        };
+        const next = [...crons.filter((current) => current.id !== entry.id), entry];
+        await runtime.state.saveCrons(next);
+        return entry;
+      },
+    },
+    {
+      name: 'cron-run-due',
+      description: 'Run due cron/background jobs immediately',
+      async execute(runtime) {
+        await runtime.tickBackgroundJobs();
+        return {
+          ok: true,
+          crons: await runtime.state.loadCrons(),
+        };
+      },
+    },
+    {
+      name: 'dream-start',
+      description: 'Enable background dream consolidation through the cron scheduler',
+      async execute(runtime, args = {}) {
+        const current = await runtime.state.loadCrons();
+        const id = args.id ?? 'dream-background';
+        const schedule = args.schedule ?? '@every:15m';
+        const existing = current.find((entry) => entry.id === id);
+        if (existing) {
+          Object.assign(existing, {
+            schedule,
+            command: 'dream',
+            kind: 'dream',
+            enabled: true,
+            sessionId: args.sessionId ?? runtime.session.id,
+          });
+        } else {
+          current.push({
+            id,
+            schedule,
+            command: 'dream',
+            kind: 'dream',
+            enabled: true,
+            sessionId: args.sessionId ?? runtime.session.id,
+            createdAt: new Date().toISOString(),
+          });
+        }
+        await runtime.state.saveCrons(current);
+        runtime.startBackgroundJobs?.();
+        return current.find((entry) => entry.id === id);
+      },
+    },
+    {
+      name: 'dream-stop',
+      description: 'Disable background dream consolidation',
+      async execute(runtime, args = {}) {
+        const id = args.id ?? 'dream-background';
+        const current = await runtime.state.loadCrons();
+        const next = current.map((entry) => entry.id === id ? { ...entry, enabled: false } : entry);
+        await runtime.state.saveCrons(next);
+        return next.find((entry) => entry.id === id) ?? null;
+      },
+    },
+    {
+      name: 'dream-status',
+      description: 'Show background dream scheduling status',
+      async execute(runtime, args = {}) {
+        const entries = await runtime.state.loadCrons();
+        const id = args.id ?? 'dream-background';
+        return {
+          automation: runtime.backgroundTimer ? 'active' : 'idle',
+          entry: entries.find((entry) => entry.id === id) ?? null,
+        };
+      },
+    },
+    {
       name: 'auto',
       description: 'Run app-aware auto mode using a prompt, stdin, or app automation defaults',
       async execute(runtime, args = {}) {
@@ -1144,6 +1522,14 @@ export function createCommandRegistry() {
         current.push(entry);
         await runtime.state.saveCrons(current);
         return entry;
+      },
+    },
+    {
+      name: 'cron-run-due',
+      description: 'Run due background cron jobs immediately',
+      async execute(runtime) {
+        await runtime.tickBackgroundJobs?.();
+        return runtime.state.loadCrons();
       },
     },
     {

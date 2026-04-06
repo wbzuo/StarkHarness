@@ -1,7 +1,7 @@
 export function createBridgeBlueprint() {
   return {
     ide: 'planned',
-    remote: 'planned',
+    remote: 'ready',
     mobile: 'planned',
     web: 'ready',
   };

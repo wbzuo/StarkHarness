@@ -78,6 +78,33 @@
 - swarm 便捷命令：
   - `swarm-start`
   - `swarm-status`
+- tmux 驱动的多终端 swarm 命令：
+  - `swarm-launch`
+  - `swarm-list`
+  - `swarm-stop`
+- 文件缓存命令：
+  - `file-cache-status`
+  - `file-cache-clear`
+- managed settings 与 remote bridge 命令：
+  - `settings-status`
+  - `settings-sync`
+  - `remote-status`
+  - `remote-connect`
+  - `remote-poll`
+  - `remote-disconnect`
+- DXT 与插件信任链命令：
+  - `plugin-package-dxt`
+  - `plugin-validate-dxt`
+  - `plugin-trust`
+  - `plugin-trust-list`
+  - `plugin-autoupdate`
+- 后台 dream 与调度命令：
+  - `dream-start`
+  - `dream-stop`
+  - `dream-status`
+  - `cron-run-due`
+- dependency-free TUI 面板：
+  - `tui`
 - 普通交互式 CLI 也具备权限审批提示，不再只局限于 REPL
 - coordinator mode 现在会真正限制工具面，而不是只靠 system prompt 提示
 - agent summary 现在优先尝试 LLM 摘要，失败时才回退到文本截断

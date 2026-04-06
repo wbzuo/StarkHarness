@@ -10,6 +10,9 @@ Debugging StarkHarness is currently centered around a few key surfaces.
 - `login-status`
 - `oauth-status`
 - `status`
+- `file-cache-status`
+- `settings-status`
+- `remote-status`
 - `voice-status`
 - `web-access-status`
 - `transcript`
@@ -27,6 +30,10 @@ State is written under `.starkharness/`:
 - trace JSONL
 - agent state
 - worker state
+- managed settings snapshot
+- cron schedules
+- trusted plugin list
+- swarm session metadata
 
 ## Remote Debugging
 
@@ -38,6 +45,8 @@ When bridge mode is running, `/docs` provides a live docs and runtime control su
 - env
 - web-access
 - voice
+- file cache
+- remote bridge
 - blueprint
 - providers
 - live prompt execution

@@ -1,4 +1,4 @@
-import { readFile, writeFile, mkdir, readdir } from 'node:fs/promises';
+import { readFile, mkdir } from 'node:fs/promises';
 import path from 'node:path';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
@@ -119,21 +119,11 @@ async function loadNotebook(filePath) {
   return JSON.parse(await readFile(filePath, 'utf8'));
 }
 
-async function saveNotebook(filePath, notebook) {
-  await writeFile(filePath, JSON.stringify(notebook, null, 2), 'utf8');
-  return filePath;
-}
-
-async function walkFiles(rootDir) {
-  const entries = await readdir(rootDir, { withFileTypes: true });
-  const results = [];
-  for (const entry of entries) {
-    if (entry.name === '.git' || entry.name === 'node_modules' || entry.name === '.starkharness') continue;
-    const fullPath = path.join(rootDir, entry.name);
-    if (entry.isDirectory()) results.push(...(await walkFiles(fullPath)));
-    else results.push(fullPath);
+async function walkFiles(runtime) {
+  if (runtime.fileCache?.listFiles) {
+    return runtime.fileCache.listFiles(runtime.context.cwd);
   }
-  return results;
+  return [];
 }
 
 export function createBuiltinTools() {
@@ -153,7 +143,9 @@ export function createBuiltinTools() {
       },
       async execute(input = {}, runtime) {
         const filePath = resolveWorkspacePath(runtime, input.path);
-        let content = await readFile(filePath, 'utf8');
+        let content = runtime.fileCache?.readText
+          ? await runtime.fileCache.readText(filePath)
+          : await readFile(filePath, 'utf8');
         if (input.offset !== undefined || input.limit !== undefined) {
           const lines = content.split('\n');
           const start = input.offset ?? 0;
@@ -239,7 +231,11 @@ export function createBuiltinTools() {
           });
         }
         notebook.cells = cells;
-        await saveNotebook(filePath, notebook);
+        if (runtime.fileCache?.writeText) {
+          await runtime.fileCache.writeText(filePath, JSON.stringify(notebook, null, 2));
+        } else {
+          throw new Error('file cache unavailable for notebook edit');
+        }
         return { ok: true, tool: 'notebook_edit', path: filePath, action: input.action, cells: notebook.cells.length };
       },
     }),
@@ -259,7 +255,8 @@ export function createBuiltinTools() {
       async execute(input = {}, runtime) {
         const filePath = resolveWorkspacePath(runtime, input.path);
         await mkdir(path.dirname(filePath), { recursive: true });
-        await writeFile(filePath, input.content ?? '', 'utf8');
+        if (runtime.fileCache?.writeText) await runtime.fileCache.writeText(filePath, input.content ?? '');
+        else throw new Error('file cache unavailable for write');
         return { ok: true, tool: 'write_file', path: filePath, bytes: Buffer.byteLength(input.content ?? '', 'utf8') };
       },
     }),
@@ -280,7 +277,9 @@ export function createBuiltinTools() {
       },
       async execute(input = {}, runtime) {
         const filePath = resolveWorkspacePath(runtime, input.path);
-        const current = await readFile(filePath, 'utf8');
+        const current = runtime.fileCache?.readText
+          ? await runtime.fileCache.readText(filePath)
+          : await readFile(filePath, 'utf8');
         if (!current.includes(input.old_string ?? input.oldString ?? '')) {
           return { ok: false, tool: 'edit_file', reason: 'old-string-not-found', path: filePath };
         }
@@ -298,7 +297,8 @@ export function createBuiltinTools() {
           };
         }
         const next = input.replace_all ? current.replaceAll(search, replacement) : current.replace(search, replacement);
-        await writeFile(filePath, next, 'utf8');
+        if (runtime.fileCache?.writeText) await runtime.fileCache.writeText(filePath, next);
+        else throw new Error('file cache unavailable for edit');
         return {
           ok: true,
           tool: 'edit_file',
@@ -415,13 +415,14 @@ export function createBuiltinTools() {
       },
       async execute(input = {}, runtime) {
         const query = String(input.query ?? '');
-        const files = await walkFiles(runtime.context.cwd);
+        const files = await walkFiles(runtime);
         const filtered = input.glob
           ? files.filter((filePath) => matchesGlob(filePath, String(input.glob), runtime.context.cwd))
           : files;
         const matches = [];
         for (const filePath of filtered) {
-          const content = await readFile(filePath, 'utf8').catch(() => null);
+          const content = await runtime.fileCache?.readText?.(filePath).catch(() => null)
+            ?? await readFile(filePath, 'utf8').catch(() => null);
           if (!content || !query) continue;
           content.split('\n').forEach((line, index) => {
             if (line.includes(query)) matches.push({ path: filePath, line: index + 1, text: line.trim() });
@@ -448,7 +449,7 @@ export function createBuiltinTools() {
         required: ['pattern'],
       },
       async execute(input = {}, runtime) {
-        const files = await walkFiles(runtime.context.cwd);
+        const files = await walkFiles(runtime);
         const filtered = input.glob
           ? files.filter((filePath) => matchesGlob(filePath, String(input.glob), runtime.context.cwd))
           : files;
@@ -463,7 +464,8 @@ export function createBuiltinTools() {
         const maxMatches = Number(input.maxMatches ?? 100);
         const matches = [];
         for (const filePath of filtered) {
-          const content = await readFile(filePath, 'utf8').catch(() => null);
+          const content = await runtime.fileCache?.readText?.(filePath).catch(() => null)
+            ?? await readFile(filePath, 'utf8').catch(() => null);
           if (!content) continue;
           matches.push(...grepFile(content, filePath, regex, { before, after }));
           if (matches.length >= maxMatches) break;
@@ -549,7 +551,7 @@ export function createBuiltinTools() {
       },
       async execute(input = {}, runtime) {
         const pattern = String(input.pattern ?? '');
-        const files = await walkFiles(runtime.context.cwd);
+        const files = await walkFiles(runtime);
         const matches = files.filter((filePath) => matchesGlob(filePath, pattern, runtime.context.cwd));
         return { ok: true, tool: 'glob', pattern, matches };
       },

@@ -7,5 +7,7 @@ export function createWorkspaceBlueprint() {
     app: 'ready',
     scaffold: 'ready',
     deploy: 'starter',
+    cache: 'ready',
+    swarm: 'tmux',
   };
 }
