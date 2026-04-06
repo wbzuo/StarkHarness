@@ -9,6 +9,7 @@ export class StateStore {
     this.agentDir = path.join(rootDir, 'agents');
     this.todosPath = path.join(rootDir, 'todos.json');
     this.authProfilesPath = path.join(rootDir, 'auth-profiles.json');
+    this.cronsPath = path.join(rootDir, 'crons.json');
   }
 
   async init() {
@@ -171,5 +172,15 @@ export class StateStore {
     delete current[provider];
     await writeFile(this.authProfilesPath, JSON.stringify(current, null, 2), 'utf8');
     return current;
+  }
+
+  async loadCrons() {
+    const content = await readFile(this.cronsPath, 'utf8').catch(() => '[]');
+    return JSON.parse(content);
+  }
+
+  async saveCrons(crons) {
+    await writeFile(this.cronsPath, JSON.stringify(crons, null, 2), 'utf8');
+    return this.cronsPath;
   }
 }

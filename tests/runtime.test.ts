@@ -313,6 +313,95 @@ test('grep tool supports regex and context lines', async () => {
   assert.equal(result.matches[1].path, path.join(root, 'logs/app.log'));
 });
 
+test('tool_search finds tools by name and description', async () => {
+  const { runtime } = await makeRuntime();
+  const result = await runHarnessTurn(runtime, {
+    tool: 'tool_search',
+    input: { query: 'browser' },
+  });
+  assert.equal(result.ok, true);
+  assert.ok(result.matches.some((tool) => tool.name === 'browser_open'));
+});
+
+test('lsp_diagnostics reports TypeScript errors for a file', async () => {
+  const { runtime } = await makeRuntime();
+  runtime.permissions.rules.write = 'allow';
+  await runHarnessTurn(runtime, {
+    tool: 'write_file',
+    input: { path: 'src/broken.ts', content: 'const value: string = 123;\n' },
+  });
+
+  const result = await runHarnessTurn(runtime, {
+    tool: 'lsp_diagnostics',
+    input: { path: 'src/broken.ts' },
+  });
+  assert.equal(result.ok, true);
+  assert.equal(result.diagnostics.length > 0, true);
+  assert.match(result.diagnostics[0].message, /string/i);
+});
+
+test('lsp_workspace_symbols finds symbols in workspace files', async () => {
+  const { runtime } = await makeRuntime();
+  runtime.permissions.rules.write = 'allow';
+  await runHarnessTurn(runtime, {
+    tool: 'write_file',
+    input: { path: 'src/symbols.ts', content: 'export function helperThing() { return 1; }\n' },
+  });
+
+  const result = await runHarnessTurn(runtime, {
+    tool: 'lsp_workspace_symbols',
+    input: { query: 'helperThing' },
+  });
+  assert.equal(result.ok, true);
+  assert.equal(result.symbols.some((symbol) => symbol.name === 'helperThing'), true);
+});
+
+test('notebook_edit can insert and replace notebook cells', async () => {
+  const { runtime, root } = await makeRuntime();
+  runtime.permissions.rules.write = 'allow';
+  const notebook = {
+    cells: [
+      { cell_type: 'markdown', metadata: {}, source: ['# Title\n'] },
+    ],
+    metadata: {},
+    nbformat: 4,
+    nbformat_minor: 5,
+  };
+  await runHarnessTurn(runtime, {
+    tool: 'write_file',
+    input: { path: 'notebooks/demo.ipynb', content: JSON.stringify(notebook, null, 2) },
+  });
+
+  const inserted = await runHarnessTurn(runtime, {
+    tool: 'notebook_edit',
+    input: {
+      path: 'notebooks/demo.ipynb',
+      action: 'insert_cell',
+      index: 1,
+      cellType: 'code',
+      source: 'print("hello")',
+    },
+  });
+  assert.equal(inserted.ok, true);
+
+  const replaced = await runHarnessTurn(runtime, {
+    tool: 'notebook_edit',
+    input: {
+      path: 'notebooks/demo.ipynb',
+      action: 'replace_cell',
+      index: 0,
+      cellType: 'markdown',
+      source: '# Updated',
+    },
+  });
+  assert.equal(replaced.ok, true);
+
+  const saved = JSON.parse(await readFile(path.join(root, 'notebooks/demo.ipynb'), 'utf8'));
+  assert.equal(saved.cells.length, 2);
+  assert.match(saved.cells[0].source.join(''), /Updated/);
+  assert.match(saved.cells[1].source.join(''), /hello/);
+});
+
 test('delegate tools persist agents tasks and messages', async () => {
   const { runtime } = await makeRuntime();
   const agentResult = await runHarnessTurn(runtime, {
@@ -737,6 +826,25 @@ test('todo_write persists user-facing todos and todos command lists them', async
   const todos = await runtime.dispatchCommand('todos');
   assert.equal(todos.length, 2);
   assert.equal(todos[0].content, 'Add grep tool');
+  await runtime.shutdown();
+});
+
+test('cron commands persist and delete scheduled entries', async () => {
+  const { runtime } = await makeRuntime();
+  const created = await runtime.dispatchCommand('cron-create', {
+    schedule: '0 * * * *',
+    prompt: 'Summarize the latest changes',
+  });
+  assert.equal(created.id, 'cron-1');
+
+  const listed = await runtime.dispatchCommand('cron-list');
+  assert.equal(listed.length, 1);
+  assert.equal(listed[0].schedule, '0 * * * *');
+
+  const deleted = await runtime.dispatchCommand('cron-delete', { id: 'cron-1' });
+  assert.equal(deleted.removed, 1);
+  const after = await runtime.dispatchCommand('cron-list');
+  assert.equal(after.length, 0);
   await runtime.shutdown();
 });
 

@@ -763,6 +763,41 @@ export function createCommandRegistry() {
       },
     },
     {
+      name: 'cron-list',
+      description: 'List persisted cron schedules',
+      async execute(runtime) {
+        return runtime.state.loadCrons();
+      },
+    },
+    {
+      name: 'cron-create',
+      description: 'Persist a cron-like scheduled task definition',
+      async execute(runtime, args = {}) {
+        const current = await runtime.state.loadCrons();
+        const entry = {
+          id: args.id ?? `cron-${current.length + 1}`,
+          schedule: args.schedule ?? '* * * * *',
+          prompt: args.prompt ?? '',
+          command: args.command ?? '',
+          enabled: args.enabled !== 'false',
+          createdAt: new Date().toISOString(),
+        };
+        current.push(entry);
+        await runtime.state.saveCrons(current);
+        return entry;
+      },
+    },
+    {
+      name: 'cron-delete',
+      description: 'Delete a persisted cron schedule by id',
+      async execute(runtime, args = {}) {
+        const current = await runtime.state.loadCrons();
+        const next = current.filter((entry) => entry.id !== args.id);
+        await runtime.state.saveCrons(next);
+        return { ok: true, removed: current.length - next.length };
+      },
+    },
+    {
       name: 'replay-turn',
       description: 'Produce a deterministic replay skeleton for recorded turns',
       async execute(runtime) {

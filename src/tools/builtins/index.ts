@@ -5,6 +5,7 @@ import { promisify } from 'node:util';
 import { defineTool } from '../types.js';
 import { ensureWebAccessReady, callWebAccessProxy, loadSiteContext } from '../../web-access/index.js';
 import { webSearch } from '../../search/web.js';
+import { getFileDiagnostics, searchWorkspaceSymbols } from '../../lsp/diagnostics.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -112,6 +113,15 @@ function resolveWorkspacePath(runtime, targetPath = '.') {
   return path.resolve(runtime.context.cwd, targetPath);
 }
 
+async function loadNotebook(filePath) {
+  return JSON.parse(await readFile(filePath, 'utf8'));
+}
+
+async function saveNotebook(filePath, notebook) {
+  await writeFile(filePath, JSON.stringify(notebook, null, 2), 'utf8');
+  return filePath;
+}
+
 async function walkFiles(rootDir) {
   const entries = await readdir(rootDir, { withFileTypes: true });
   const results = [];
@@ -149,6 +159,51 @@ export function createBuiltinTools() {
           content = lines.slice(start, end).join('\n');
         }
         return { ok: true, tool: 'read_file', path: filePath, content };
+      },
+    }),
+
+    defineTool({
+      name: 'notebook_edit',
+      capability: 'write',
+      description: 'Edit a Jupyter notebook cell by inserting, replacing, or deleting cells.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          path: { type: 'string', description: 'Relative path to the .ipynb notebook file' },
+          action: { type: 'string', enum: ['replace_cell', 'insert_cell', 'delete_cell'], description: 'Notebook edit action' },
+          index: { type: 'number', description: 'Cell index to edit' },
+          cellType: { type: 'string', enum: ['markdown', 'code'], description: 'Cell type for inserted cells' },
+          source: { type: 'string', description: 'Cell source text' },
+        },
+        required: ['path', 'action', 'index'],
+      },
+      async execute(input = {}, runtime) {
+        const filePath = resolveWorkspacePath(runtime, input.path);
+        const notebook = await loadNotebook(filePath);
+        const cells = Array.isArray(notebook.cells) ? [...notebook.cells] : [];
+        if (input.action === 'delete_cell') {
+          cells.splice(input.index, 1);
+        } else if (input.action === 'replace_cell') {
+          cells[input.index] = {
+            ...(cells[input.index] ?? {}),
+            cell_type: input.cellType ?? cells[input.index]?.cell_type ?? 'markdown',
+            metadata: cells[input.index]?.metadata ?? {},
+            source: String(input.source ?? '').split('\n').map((line, idx, arr) => idx < arr.length - 1 ? `${line}\n` : line),
+            outputs: cells[input.index]?.outputs ?? [],
+            execution_count: cells[input.index]?.execution_count ?? null,
+          };
+        } else if (input.action === 'insert_cell') {
+          cells.splice(input.index, 0, {
+            cell_type: input.cellType ?? 'markdown',
+            metadata: {},
+            source: String(input.source ?? '').split('\n').map((line, idx, arr) => idx < arr.length - 1 ? `${line}\n` : line),
+            outputs: [],
+            execution_count: null,
+          });
+        }
+        notebook.cells = cells;
+        await saveNotebook(filePath, notebook);
+        return { ok: true, tool: 'notebook_edit', path: filePath, action: input.action, cells: notebook.cells.length };
       },
     }),
 
@@ -323,6 +378,65 @@ export function createBuiltinTools() {
           pattern: String(input.pattern ?? ''),
           matches: matches.slice(0, maxMatches),
         };
+      },
+    }),
+
+    defineTool({
+      name: 'tool_search',
+      capability: 'read',
+      description: 'Search available tools by name or description.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          query: { type: 'string', description: 'Substring query to match against tool names and descriptions' },
+        },
+        required: ['query'],
+      },
+      async execute(input = {}, runtime) {
+        const query = String(input.query ?? '').toLowerCase();
+        const matches = runtime.tools.list()
+          .filter((tool) => tool.name.toLowerCase().includes(query) || String(tool.description ?? '').toLowerCase().includes(query))
+          .map((tool) => ({
+            name: tool.name,
+            capability: tool.capability,
+            description: tool.description,
+          }));
+        return { ok: true, tool: 'tool_search', query, matches };
+      },
+    }),
+
+    defineTool({
+      name: 'lsp_diagnostics',
+      capability: 'read',
+      description: 'Collect TypeScript/JavaScript diagnostics for a file.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          path: { type: 'string', description: 'Relative path to the source file' },
+        },
+        required: ['path'],
+      },
+      async execute(input = {}, runtime) {
+        const filePath = resolveWorkspacePath(runtime, input.path);
+        const diagnostics = getFileDiagnostics(filePath, { cwd: runtime.context.cwd });
+        return { ok: true, tool: 'lsp_diagnostics', file: filePath, diagnostics };
+      },
+    }),
+
+    defineTool({
+      name: 'lsp_workspace_symbols',
+      capability: 'read',
+      description: 'Search workspace symbols using a lightweight TypeScript-backed index.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          query: { type: 'string', description: 'Symbol name or pattern to search for' },
+        },
+        required: ['query'],
+      },
+      async execute(input = {}, runtime) {
+        const symbols = searchWorkspaceSymbols(runtime.context.cwd, String(input.query ?? ''));
+        return { ok: true, tool: 'lsp_workspace_symbols', query: input.query, symbols };
       },
     }),
 
