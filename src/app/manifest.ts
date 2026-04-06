@@ -53,6 +53,7 @@ export async function loadAppManifest({ cwd = process.cwd(), appPath = null } = 
     },
     features: {
       webAccess: raw.features?.webAccess !== false,
+      voice: raw.features?.voice !== false,
     },
     paths: {
       commandsDir: resolveMaybe(rootDir, paths.commandsDir ?? 'commands'),

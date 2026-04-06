@@ -7,6 +7,7 @@ import { defineTool } from '../types.js';
 import { ensureWebAccessReady, callWebAccessProxy, loadSiteContext } from '../../web-access/index.js';
 import { webSearch } from '../../search/web.js';
 import { getFileDiagnostics, searchWorkspaceSymbols } from '../../lsp/diagnostics.js';
+import { transcribeAudio } from '../../voice/index.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -573,6 +574,36 @@ export function createBuiltinTools() {
           envConfig: runtime.env,
         });
         return { ok: true, tool: 'web_search', ...result };
+      },
+    }),
+
+    defineTool({
+      name: 'voice_transcribe',
+      capability: 'network',
+      description: 'Transcribe a local audio file through the configured voice provider.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          path: { type: 'string', description: 'Relative path to the audio file' },
+          prompt: { type: 'string', description: 'Optional guidance prompt for the transcription model' },
+          language: { type: 'string', description: 'Optional language hint' },
+        },
+        required: ['path'],
+      },
+      async execute(input = {}, runtime) {
+        const filePath = resolveWorkspacePath(runtime, input.path);
+        const result = await transcribeAudio({
+          filePath,
+          prompt: input.prompt,
+          language: input.language,
+          envConfig: runtime.env,
+        });
+        return {
+          ok: true,
+          tool: 'voice_transcribe',
+          path: filePath,
+          ...result,
+        };
       },
     }),
 

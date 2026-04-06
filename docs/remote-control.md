@@ -7,6 +7,7 @@ Remote Control is the bridge surface that turns StarkHarness into a controllable
 Key endpoints:
 
 - `GET /health`
+- `GET /status`
 - `GET /session`
 - `GET /app`
 - `GET /blueprint`
@@ -20,6 +21,8 @@ Key endpoints:
 - `GET /tasks`
 - `GET /workers`
 - `GET /traces`
+- `GET /docs`
+- `GET /docs/page?name=...`
 - `POST /command/:name`
 - `POST /run`
 - `POST /stream`
@@ -32,6 +35,12 @@ Key endpoints:
 - command execution
 - subscriptions
 - filtered runtime events by topic, `traceId`, and `agentId`
+
+## Local Docs Surface
+
+`/docs` is now a dynamic browser control page backed by the active bridge.
+
+The bridge also serves local documentation pages through `/docs/page?name=...`, so the docs site can render the exact files from the current workspace instead of linking to an older branch snapshot on GitHub.
 
 ## Environment Controls
 
@@ -52,3 +61,5 @@ For non-local use, always configure:
 - a bridge token
 - token profile mapping
 - appropriate sandbox policy
+
+Also prefer exposing only the bridge surfaces you actually need. StarkHarness can run locally without publishing the remote-control plane to a wider network.

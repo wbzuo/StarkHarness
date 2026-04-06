@@ -22,11 +22,13 @@
 - [Architecture Deep Dive](./docs/architecture-deep-dive.md)
 - [Contributor Guide](./docs/contributor-guide.md)
 - [Roadmap](./ROADMAP.md)
+- [Version History](./docs/version-history.md)
 - [Auto Mode](./docs/auto-mode.md)
 - [Remote Control](./docs/remote-control.md)
 - [Providers & Login](./docs/providers-and-login.md)
 - [Web Search](./docs/web-search.md)
 - [Debug](./docs/debug.md)
+- [Voice Mode](./docs/voice-mode.md)
 
 ---
 
@@ -44,7 +46,7 @@ The docs site is a dynamic, browser-based control surface. It combines:
 - quick links to the written docs
 - a prompt playground backed by the active runtime
 
-This is the primary V3 documentation experience on top of the bridge.
+This is now the active local documentation experience on top of the bridge. It reads the current workspace docs instead of sending you to an older branch snapshot.
 
 ---
 
@@ -148,10 +150,16 @@ The runtime now has a first-pass enterprise operations layer:
 | :--- | :--- | :--- |
 | `read_file` | `read` | **Line Slicing**: `offset` and `limit` for surgical reading. |
 | `search` | `read` | **Workspace Search**: Text search with optional glob filtering. |
+| `grep` | `read` | **Regex Search**: Regex matching with before/after context lines. |
+| `tool_search` | `read` | **Tool Discovery**: Find tools by name or description at runtime. |
 | `web_search` | `network` | **Search Engine Results**: Query the configured Bing-style web search endpoint. |
 | `edit_file` | `write` | **Global Replace**: `replace_all: true` for bulk updates. |
+| `notebook_edit` | `write` | **Notebook Editing**: Insert, replace, or delete `.ipynb` cells. |
 | `shell` | `exec` | **Safe Execution**: `/bin/sh -c` with 120s timeout and 4MB buffer. |
+| `repl_tool` | `exec` | **Session REPL**: Run JavaScript or Python snippets in a named REPL session. |
+| `ask_user_question` | `delegate` | **Interactive Prompting**: Ask the user a direct question during a run. |
 | `fetch_url` | `network` | **Remote Context**: Fetch HTTP content directly into the runtime. |
+| `voice_transcribe` | `network` | **Voice Input**: Transcribe an audio file through the configured voice endpoint. |
 | `browser_open` | `network` | **CDP Tab Control**: Open URLs in Chrome through the bundled web-access proxy. |
 | `browser_eval` | `network` | **Browser Extraction**: Evaluate JavaScript against a live browser target. |
 | `web_site_context` | `read` | **Site Knowledge**: Load bundled site-pattern guidance for known domains. |
@@ -176,16 +184,27 @@ Execute commands via `node --import tsx src/main.ts <command>`.
 | `blueprint` | **Runtime Blueprint**: Print the assembled runtime surface and active capabilities. |
 | `registry` | **Full Diagnostic**: Lists all tools, commands, providers, and plugin conflicts. |
 | `doctor` | **Health Check**: Validates harness wiring and system surfaces. |
+| `status` | **Product Status**: Show app, provider, bridge, voice, web-access, and swarm summary data. |
 | `starter-apps` | **Template Discovery**: List bundled app templates for one-command scaffolding. |
 | `init` | **Scaffold**: Create a runnable app skeleton with starter assets and deployment files. |
 | `app-status` | **App Metadata**: Show the loaded `starkharness.app.json` metadata. |
 | `env-status` | **Env Config**: Show resolved `.env` values, feature switches, and bridge config. |
 | `login` / `logout` | **Provider Auth**: Persist or remove provider settings in the app/workspace env file. |
 | `login-status` | **Provider Login**: Show which provider backends are configured and ready. |
+| `oauth-status` / `oauth-refresh` | **OAuth Profiles**: Inspect or refresh saved OAuth login state. |
 | `observability-status` | **Enterprise Telemetry**: Show monitoring and Sentry integration status. |
 | `feature-flags` | **Rollout State**: Show merged local and remote feature flags. |
 | `growthbook-sync` | **Remote Flags**: Refresh feature flags from GrowthBook-compatible config. |
 | `web-access-status` | **Browser/Web Status**: Show bundled `web-access` availability, scripts, and proxy endpoint details. |
+| `voice-status` / `voice-transcribe` | **Voice Surface**: Inspect or use the built-in voice transcription path. |
+| `plugin-marketplace-list` / `plugin-install` / `plugin-uninstall` | **Plugin Marketplace**: Discover and manage app-local plugin manifests. |
+| `magic-docs` | **Doc Research**: Search the web and summarize the top documentation hits. |
+| `dream` | **Memory Consolidation**: Extract durable memory from the current transcript. |
+| `session-transcript` | **Transcript Storage**: Load the persisted JSONL conversation log for a session. |
+| `enter-plan-mode` / `exit-plan-mode` / `plan-status` | **Plan Mode**: Toggle a read-only planning posture. |
+| `enter-coordinator-mode` / `exit-coordinator-mode` / `coordinator-status` | **Coordinator Mode**: Switch into delegation-first orchestration. |
+| `swarm-start` / `swarm-status` | **Swarm Execution**: Launch a scoped multi-agent swarm and inspect it. |
+| `cron-list` / `cron-create` / `cron-delete` | **Schedules**: Persist lightweight cron-style automation entries. |
 | `auto` | **Auto Mode**: Run the app automation default prompt or command without hand-written CLI choreography. |
 | `run` | **Agent Loop**: Execute a full provider-backed agent run for a prompt. |
 | `repl` / `chat` | **Interactive Mode**: Start the readline-based local REPL. |
@@ -247,6 +266,14 @@ node --import tsx src/main.ts login-status
 node --import tsx src/main.ts logout --provider=openai
 ```
 
+OAuth-backed login is also available:
+
+```bash
+node --import tsx src/main.ts login --method=oauth --provider=openai --authorizeUrl=https://example.com/oauth/authorize --tokenUrl=https://example.com/oauth/token --clientId=starkharness
+node --import tsx src/main.ts oauth-status
+node --import tsx src/main.ts oauth-refresh --provider=openai
+```
+
 ---
 
 ## 🌉 Remote Control / Bridge
@@ -256,6 +283,7 @@ Bridge mode now exposes a broader remote-control surface beyond `/run` and `/str
 Key HTTP endpoints include:
 
 - `GET /health`
+- `GET /status`
 - `GET /session`
 - `GET /app`
 - `GET /blueprint`
@@ -263,6 +291,8 @@ Key HTTP endpoints include:
 - `GET /registry`
 - `GET /env`
 - `GET /web-access`
+- `GET /docs`
+- `GET /docs/page?name=...`
 - `POST /command/:name`
 - `POST /run`
 - `POST /stream`
@@ -311,11 +341,12 @@ starter/
 ## 🧭 Current Maturity
 
 - **Already solid**: runtime assembly, multi-turn execution, mailbox-driven multi-agent orchestration, bridge authz, persistence, telemetry, and replay-oriented diagnostics.
-- **Partially implemented**: MCP beyond tool loading, higher-level web strategy beyond the current browser primitives, Docker isolation, and the richer TUI described in the roadmap.
+- **Already product-visible on the active line**: app scaffold/manifest, OAuth profiles, session transcripts, local docs pages, plugin marketplace basics, voice transcription, and swarm convenience commands.
+- **Partially implemented**: MCP beyond tool loading, higher-level web strategy beyond the current browser primitives, Docker isolation, richer remote session coordination, and the fuller TUI described in the roadmap.
 - **Enterprise baseline available**: observability hooks, custom Sentry, GrowthBook-compatible remote flags, and remote-control diagnostics now exist as first-pass integrations.
 - **Still early**: the package is `0.1.0`, remains `private`, and the repository does not yet ship a root `LICENSE` file.
 
-For a grounded walkthrough of these tradeoffs, start with the [Architecture Deep Dive](./docs/architecture-deep-dive.md) and the [Contributor Guide](./docs/contributor-guide.md).
+For a grounded walkthrough of these tradeoffs, start with the [Architecture Deep Dive](./docs/architecture-deep-dive.md), the [Version History](./docs/version-history.md), and the [Contributor Guide](./docs/contributor-guide.md).
 
 ---
 

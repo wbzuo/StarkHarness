@@ -32,6 +32,7 @@ import { SkillLoader } from '../skills/loader.js';
 import { matchAndBind } from '../skills/binder.js';
 import { AgentRunner } from './runner.js';
 import { describeWebAccess } from '../web-access/index.js';
+import { describeVoice } from '../voice/index.js';
 import { createObservabilityManager } from '../enterprise/observability.js';
 import { createFeatureFlagManager } from '../enterprise/growthbook.js';
 
@@ -108,6 +109,7 @@ export async function createRuntime(options = {}) {
   const cwd = session.cwd ?? process.cwd();
   const context = createContextEnvelope({ cwd, mode: session.mode });
   const webAccess = await describeWebAccess({ cwd, env: envConfig.raw });
+  const voice = describeVoice(envConfig);
   const observability = createObservabilityManager(envConfig.telemetry);
   const featureFlags = createFeatureFlagManager(envConfig.telemetry);
 
@@ -255,6 +257,7 @@ export async function createRuntime(options = {}) {
     bridge: createBridgeBlueprint(),
     ui: createReplBlueprint(),
     webAccess,
+    voice,
     app: options.app ?? null,
     env: envConfig,
     observability,
@@ -291,6 +294,7 @@ export async function createRuntime(options = {}) {
         options.providerConfig ?? {},
       ));
       this.webAccess = await describeWebAccess({ cwd: this.context.cwd, env: nextEnv.raw });
+      this.voice = describeVoice(nextEnv);
       this.observability = createObservabilityManager(nextEnv.telemetry);
       this.featureFlags = createFeatureFlagManager(nextEnv.telemetry);
       return nextEnv;
@@ -478,6 +482,7 @@ export function createBlueprintDocument(runtime) {
     bridge: runtime.bridge,
     ui: runtime.ui,
     webAccess: runtime.webAccess,
+    voice: runtime.voice,
     app: runtime.app,
     env: runtime.env ? {
       filePath: runtime.env.filePath ?? null,

@@ -22,6 +22,7 @@ export class AgentManager {
     tools = [],
     description = '',
     color = 'blue',
+    swarmId = null,
   } = {}) {
     const agentId = id ?? `agent-${++this.#seq}`;
     const agent = {
@@ -35,6 +36,7 @@ export class AgentManager {
       tools,
       description,
       color,
+      swarmId,
       createdAt: new Date().toISOString(),
     };
     this.#agents.set(agent.id, agent);

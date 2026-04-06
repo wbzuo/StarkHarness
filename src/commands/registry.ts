@@ -12,6 +12,7 @@ import { promisify } from 'node:util';
 import { generatePkcePair, buildAuthorizationUrl } from '../oauth/pkce.js';
 import { exchangeAuthorizationCode, refreshAccessToken, waitForOAuthCode } from '../oauth/client.js';
 import { webSearch } from '../search/web.js';
+import { describeVoice, transcribeAudio } from '../voice/index.js';
 import { writeFile, rm } from 'node:fs/promises';
 
 const execFileAsync = promisify(execFile);
@@ -55,6 +56,7 @@ function createSessionSummary(runtime) {
 }
 
 function createStatusSummary(runtime) {
+  const swarms = summarizeSwarms(runtime);
   return {
     app: runtime.app
       ? {
@@ -76,12 +78,14 @@ function createStatusSummary(runtime) {
       autoMode: runtime.env?.features?.autoMode ?? false,
       autoUpdate: runtime.env?.features?.autoUpdate ?? false,
       debug: runtime.env?.features?.debug ?? false,
+      voice: runtime.env?.features?.voice ?? true,
     },
     webAccess: {
       available: runtime.webAccess?.available ?? false,
       ready: runtime.webAccess?.ready ?? false,
       proxyUrl: runtime.webAccess?.proxyUrl ?? null,
     },
+    voice: runtime.voice ?? describeVoice(runtime.env),
     bridge: runtime.env?.bridge ?? {},
     observability: runtime.observability?.status?.() ?? null,
     workers: {
@@ -96,7 +100,142 @@ function createStatusSummary(runtime) {
       tasks: runtime.tasks.list().length,
       plugins: runtime.plugins.list().length,
     },
+    swarms,
   };
+}
+
+function parseListArgument(value, { separator = ',' } = {}) {
+  if (!value) return [];
+  return String(value)
+    .split(separator)
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function parseJsonArgument(value, fallback = null) {
+  if (!value) return fallback;
+  try {
+    return JSON.parse(String(value));
+  } catch {
+    return fallback;
+  }
+}
+
+function normalizeSwarmTasks(args = {}) {
+  const explicit = parseJsonArgument(args.tasksJson ?? args.tasks, null);
+  let tasks = [];
+  if (Array.isArray(explicit)) {
+    tasks = explicit;
+  } else if (explicit && typeof explicit === 'object') {
+    tasks = [explicit];
+  } else if (typeof args.tasks === 'string' && args.tasks.trim()) {
+    tasks = String(args.tasks)
+      .split(/\n{2,}|;;/)
+      .map((entry) => entry.trim())
+      .filter(Boolean);
+  } else if (args.goal ?? args.prompt) {
+    tasks = [args.goal ?? args.prompt];
+  }
+
+  return tasks.map((entry, index) => {
+    if (typeof entry === 'string') {
+      return {
+        subject: `Swarm task ${index + 1}`,
+        description: entry,
+      };
+    }
+    return {
+      subject: entry.subject ?? entry.title ?? `Swarm task ${index + 1}`,
+      description: entry.description ?? entry.prompt ?? entry.goal ?? '',
+      role: entry.role ?? null,
+      tools: Array.isArray(entry.tools) ? entry.tools : [],
+    };
+  }).filter((task) => task.description);
+}
+
+function summarizeSwarms(runtime) {
+  const groups = new Map();
+  for (const agent of runtime.agents.list()) {
+    if (!agent.swarmId) continue;
+    const current = groups.get(agent.swarmId) ?? { id: agent.swarmId, agents: 0, tasks: 0, completedTasks: 0, failedTasks: 0 };
+    current.agents += 1;
+    groups.set(agent.swarmId, current);
+  }
+  for (const task of runtime.tasks.list()) {
+    if (!task.swarmId) continue;
+    const current = groups.get(task.swarmId) ?? { id: task.swarmId, agents: 0, tasks: 0, completedTasks: 0, failedTasks: 0 };
+    current.tasks += 1;
+    if (task.status === 'completed') current.completedTasks += 1;
+    if (task.status === 'failed') current.failedTasks += 1;
+    groups.set(task.swarmId, current);
+  }
+  return [...groups.values()];
+}
+
+async function executeSwarm(runtime, tasks, agents, { parallel = true } = {}) {
+  const queue = [...tasks];
+  const results = [];
+
+  async function runAssignment(task, agent) {
+    runtime.tasks.update(task.id, {
+      status: 'running',
+      owner: agent.id,
+      startedAt: new Date().toISOString(),
+    });
+    runtime.agents.update(agent.id, {
+      status: 'running',
+      currentTaskId: task.id,
+      dispatchCount: Number(agent.dispatchCount ?? 0) + 1,
+    });
+    await runtime.persist();
+    try {
+      const result = await runtime.executor.execute(agent, task);
+      runtime.tasks.update(task.id, {
+        status: 'completed',
+        owner: agent.id,
+        completedAt: new Date().toISOString(),
+        result,
+      });
+      runtime.agents.update(agent.id, {
+        status: 'idle',
+        currentTaskId: null,
+        lastResult: result.finalText ?? '',
+        lastError: null,
+      });
+      results.push({ taskId: task.id, agentId: agent.id, finalText: result.finalText, stopReason: result.stopReason });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      runtime.tasks.update(task.id, {
+        status: 'failed',
+        owner: agent.id,
+        failedAt: new Date().toISOString(),
+        error: message,
+      });
+      runtime.agents.update(agent.id, {
+        status: 'idle',
+        currentTaskId: null,
+        lastError: message,
+      });
+      results.push({ taskId: task.id, agentId: agent.id, error: message });
+    }
+    await runtime.persist();
+  }
+
+  const runWorker = async (agent, index) => {
+    if (!parallel) {
+      const task = tasks[index];
+      if (task) await runAssignment(task, agent);
+      return;
+    }
+    while (queue.length > 0) {
+      const task = queue.shift();
+      if (!task) break;
+      await runAssignment(task, agent);
+    }
+  };
+
+  await Promise.all(agents.map((agent, index) => runWorker(agent, index)));
+  return results;
 }
 
 export function createCommandRegistry() {
@@ -138,6 +277,32 @@ export function createCommandRegistry() {
       description: 'Show a product-style runtime status summary',
       async execute(runtime) {
         return createStatusSummary(runtime);
+      },
+    },
+    {
+      name: 'voice-status',
+      description: 'Show configured voice/transcription provider status',
+      async execute(runtime) {
+        return runtime.voice ?? describeVoice(runtime.env);
+      },
+    },
+    {
+      name: 'voice-transcribe',
+      description: 'Transcribe a local audio file through the configured voice provider',
+      async execute(runtime, args = {}) {
+        if (!args.path) throw new Error('voice-transcribe requires --path');
+        const filePath = path.resolve(runtime.context.cwd, args.path);
+        const result = await transcribeAudio({
+          filePath,
+          prompt: args.prompt ?? '',
+          language: args.language ?? '',
+          envConfig: runtime.env,
+        });
+        return {
+          ok: true,
+          path: filePath,
+          ...result,
+        };
       },
     },
     {
@@ -196,6 +361,68 @@ export function createCommandRegistry() {
           topic,
           summary,
           sources: pages.map(({ title, url, snippet }) => ({ title, url, snippet })),
+        };
+      },
+    },
+    {
+      name: 'swarm-start',
+      description: 'Create a scoped swarm of agents and run a batch of tasks across them',
+      async execute(runtime, args = {}) {
+        const swarmId = args.id ?? `swarm-${Date.now().toString(36)}`;
+        const tasks = normalizeSwarmTasks(args);
+        if (tasks.length === 0) {
+          throw new Error('swarm-start requires --goal, --prompt, --tasks, or --tasksJson');
+        }
+
+        const requestedRoles = parseListArgument(args.roles);
+        const workerCount = Math.max(1, Number(args.workers ?? (requestedRoles.length || 2)));
+        const roles = requestedRoles.length > 0
+          ? requestedRoles
+          : Array.from({ length: workerCount }, (_, index) => index === 0 ? 'planner' : 'executor');
+        const allowedTools = parseJsonArgument(args.tools, null);
+        const agents = roles.map((role, index) => runtime.agents.spawn({
+          role,
+          scope: 'swarm',
+          swarmId,
+          description: `${role} worker for ${args.goal ?? 'coordinated execution'}`,
+          tools: Array.isArray(allowedTools) ? allowedTools : [],
+          color: ['blue', 'green', 'amber', 'red'][index % 4],
+        }));
+        const createdTasks = tasks.map((task, index) => runtime.tasks.create({
+          id: `${swarmId}-task-${index + 1}`,
+          status: 'pending',
+          subject: task.subject,
+          description: task.description,
+          swarmId,
+          preferredRole: task.role,
+          tools: task.tools,
+        }));
+        await runtime.persist();
+
+        const orderedAgents = createdTasks.map((task, index) => {
+          if (!task.preferredRole) return agents[index % agents.length];
+          return agents.find((agent) => agent.role === task.preferredRole) ?? agents[index % agents.length];
+        });
+        const results = await executeSwarm(runtime, createdTasks, orderedAgents, {
+          parallel: args.parallel !== 'false',
+        });
+        return {
+          id: swarmId,
+          agents: agents.map(({ id }) => runtime.agents.get(id)).filter(Boolean),
+          tasks: createdTasks.map(({ id }) => runtime.tasks.get(id)).filter(Boolean),
+          results,
+        };
+      },
+    },
+    {
+      name: 'swarm-status',
+      description: 'Show swarm groups and their agent/task counts',
+      async execute(runtime, args = {}) {
+        if (!args.id) return summarizeSwarms(runtime);
+        return {
+          id: args.id,
+          agents: runtime.agents.list().filter((agent) => agent.swarmId === args.id),
+          tasks: runtime.tasks.list().filter((task) => task.swarmId === args.id),
         };
       },
     },

@@ -5,18 +5,113 @@ function escapeHtml(value) {
     .replaceAll('>', '&gt;');
 }
 
+export const DOC_PAGES = [
+  { id: 'readme', title: 'README', path: 'README.md' },
+  { id: 'readme-zh', title: 'README (简体中文)', path: 'README.zh-CN.md' },
+  { id: 'architecture', title: 'Architecture Deep Dive', path: 'docs/architecture-deep-dive.md' },
+  { id: 'contributor-guide', title: 'Contributor Guide', path: 'docs/contributor-guide.md' },
+  { id: 'roadmap', title: 'Roadmap', path: 'ROADMAP.md' },
+  { id: 'version-history', title: 'Version History', path: 'docs/version-history.md' },
+  { id: 'version-history-zh', title: '版本历史', path: 'docs/version-history.zh-CN.md' },
+  { id: 'auto-mode', title: 'Auto Mode', path: 'docs/auto-mode.md' },
+  { id: 'remote-control', title: 'Remote Control', path: 'docs/remote-control.md' },
+  { id: 'providers-login', title: 'Providers & Login', path: 'docs/providers-and-login.md' },
+  { id: 'web-search', title: 'Web Search', path: 'docs/web-search.md' },
+  { id: 'debug', title: 'Debug', path: 'docs/debug.md' },
+  { id: 'voice-mode', title: 'Voice Mode', path: 'docs/voice-mode.md' },
+  { id: 'voice-mode-zh', title: 'Voice Mode (简体中文)', path: 'docs/voice-mode.zh-CN.md' },
+];
+
+function getDocLinks() {
+  return DOC_PAGES.map((page) => ({
+    ...page,
+    href: `/docs/page?name=${encodeURIComponent(page.id)}`,
+  }));
+}
+
+export function createDocPageHtml({ title, content }) {
+  const nav = getDocLinks();
+  return `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>${escapeHtml(title)} · StarkHarness Docs</title>
+  <style>
+    :root {
+      --bg: #0d131b;
+      --panel: #121b26;
+      --line: rgba(255,255,255,.08);
+      --text: #eaf0f6;
+      --muted: #99afc6;
+      --accent: #60a5fa;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: radial-gradient(circle at top right, rgba(96,165,250,.12), transparent 24%), var(--bg);
+      color: var(--text);
+    }
+    a { color: var(--accent); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    .shell { max-width: 1240px; margin: 0 auto; padding: 28px 18px 60px; }
+    .back { margin-bottom: 18px; display: inline-flex; align-items: center; gap: 8px; }
+    .grid { display: grid; grid-template-columns: 290px 1fr; gap: 18px; }
+    .card {
+      background: linear-gradient(180deg, rgba(255,255,255,.03), rgba(255,255,255,.015));
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      padding: 18px;
+    }
+    .title { margin: 0 0 12px; font-size: 30px; }
+    .subtitle { color: var(--muted); line-height: 1.6; margin: 0 0 12px; }
+    .nav { display: grid; gap: 10px; }
+    .nav a {
+      display: block;
+      padding: 11px 12px;
+      border-radius: 12px;
+      border: 1px solid var(--line);
+      background: rgba(255,255,255,.02);
+    }
+    .doc {
+      white-space: pre-wrap;
+      word-break: break-word;
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      line-height: 1.65;
+      color: #d8e2ec;
+      margin: 0;
+    }
+    @media (max-width: 960px) {
+      .grid { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <a class="back" href="/docs">← Back to Dynamic Docs</a>
+    <div class="grid">
+      <aside class="card">
+        <h3 style="margin-top:0">Docs Index</h3>
+        <p class="subtitle">Browse the current local documentation surface served by the active bridge.</p>
+        <div class="nav">
+          ${nav.map((page) => `<a href="${page.href}">${escapeHtml(page.title)}</a>`).join('')}
+        </div>
+      </aside>
+      <main class="card">
+        <h1 class="title">${escapeHtml(title)}</h1>
+        <p class="subtitle">Served directly from the active workspace so the docs match the checked-out code, not an older branch snapshot.</p>
+        <pre class="doc">${escapeHtml(content)}</pre>
+      </main>
+    </div>
+  </div>
+</body>
+</html>`;
+}
+
 export function createDocsSiteHtml({ runtime }) {
   const appName = runtime.app?.name ?? 'StarkHarness';
-  const docLinks = [
-    { title: 'Architecture Deep Dive', href: 'https://github.com/wbzuo/StarkHarness/blob/v3.0/docs/architecture-deep-dive.md' },
-    { title: 'Contributor Guide', href: 'https://github.com/wbzuo/StarkHarness/blob/v3.0/docs/contributor-guide.md' },
-    { title: 'Roadmap', href: 'https://github.com/wbzuo/StarkHarness/blob/v3.0/ROADMAP.md' },
-    { title: 'Auto Mode', href: 'https://github.com/wbzuo/StarkHarness/blob/v3.0/docs/auto-mode.md' },
-    { title: 'Remote Control', href: 'https://github.com/wbzuo/StarkHarness/blob/v3.0/docs/remote-control.md' },
-    { title: 'Providers & Login', href: 'https://github.com/wbzuo/StarkHarness/blob/v3.0/docs/providers-and-login.md' },
-    { title: 'Web Search', href: 'https://github.com/wbzuo/StarkHarness/blob/v3.0/docs/web-search.md' },
-    { title: 'Debug', href: 'https://github.com/wbzuo/StarkHarness/blob/v3.0/docs/debug.md' },
-  ];
+  const docLinks = getDocLinks();
 
   return `<!doctype html>
 <html lang="en">
@@ -239,9 +334,9 @@ export function createDocsSiteHtml({ runtime }) {
           env configuration, web-access readiness, and a built-in run playground on top of the active bridge.
         </p>
         <div class="taglist">
-          <div class="tag"><b>V2 Productize</b><span class="subtitle">Scaffold, app manifest, env config, remote control, auto mode.</span></div>
+          <div class="tag"><b>V11 Active Line</b><span class="subtitle">Scaffold, app manifest, env config, remote control, voice, swarm, and docs tooling.</span></div>
           <div class="tag"><b>Live Bridge</b><span class="subtitle">Inspect runtime state and execute prompts without leaving the browser.</span></div>
-          <div class="tag"><b>Bundled Web Access</b><span class="subtitle">CDP-aware browser primitives and site-context helpers are built in.</span></div>
+          <div class="tag"><b>Bundled Web Access</b><span class="subtitle">CDP-aware browser primitives, voice transcription, and site-context helpers are built in.</span></div>
         </div>
         <div class="metrics">
           <div class="metric"><div class="label">Commands</div><div class="value" id="metric-commands">-</div></div>
@@ -258,6 +353,7 @@ export function createDocsSiteHtml({ runtime }) {
           <div class="mini"><h4>Bridge / Env</h4><pre id="env-card">Loading...</pre></div>
           <div class="mini"><h4>Web Access</h4><pre id="web-card">Loading...</pre></div>
           <div class="mini"><h4>Providers</h4><pre id="providers-card">Loading...</pre></div>
+          <div class="mini"><h4>Voice / Swarms</h4><pre id="voice-card">Loading...</pre></div>
         </div>
       </div>
     </section>
@@ -265,7 +361,7 @@ export function createDocsSiteHtml({ runtime }) {
     <section class="grid">
       <div class="card">
         <h3 class="block-title">Docs Hub</h3>
-        <p class="subtitle">Open the detailed docs for architecture, contributor guidance, roadmap, auto mode, remote control, providers/login, web search, and debugging.</p>
+        <p class="subtitle">Open the detailed docs for architecture, contributor guidance, roadmap, version history, voice mode, remote control, providers/login, web search, and debugging.</p>
         <div class="docs-grid">
           ${docLinks.map((link) => `<a class="doc-link" href="${link.href}" target="_blank" rel="noreferrer">${link.title}</a>`).join('')}
         </div>
@@ -303,7 +399,7 @@ export function createDocsSiteHtml({ runtime }) {
 
     async function refresh() {
       try {
-        const [health, app, env, web, providers, blueprint, workers] = await Promise.all([
+        const [health, app, env, web, providers, blueprint, workers, status] = await Promise.all([
           getJson('/health'),
           getJson('/app'),
           getJson('/env'),
@@ -311,6 +407,7 @@ export function createDocsSiteHtml({ runtime }) {
           getJson('/providers'),
           getJson('/blueprint'),
           getJson('/workers'),
+          getJson('/status'),
         ]);
 
         $('metric-commands').textContent = String(blueprint.commands.length);
@@ -321,6 +418,7 @@ export function createDocsSiteHtml({ runtime }) {
         $('env-card').textContent = pretty({ envFile: env?.filePath ?? null, features: env?.features ?? {}, bridge: env?.bridge ?? {} });
         $('web-card').textContent = pretty(web);
         $('providers-card').textContent = pretty(providers);
+        $('voice-card').textContent = pretty({ voice: status?.voice ?? null, swarms: status?.swarms ?? [] });
 
         const status = $('status-health');
         status.innerHTML = '<span class="dot ok"></span><span>Healthy · session ' + health.sessionId + '</span>';

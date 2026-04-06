@@ -2,6 +2,12 @@
 
 This document turns the current version plan into an executable release roadmap.
 
+Active maintenance note:
+
+- Historical milestone branches were cut through `v11.0`.
+- Ongoing development now continues on `v11.0` instead of creating a new version branch for every incremental capability slice.
+- See `docs/version-history.md` for the concrete shipped milestone log.
+
 Branch strategy:
 
 - `v1.0`: stable baseline focused on "it runs"
@@ -219,6 +225,16 @@ Exit criteria:
 - The codebase is modularized enough for long-term maintenance
 - Major subsystems can evolve independently
 - Historical compatibility and migration strategy are documented
+
+## Post-V6 Milestones
+
+After the original V1-V6 phase plan, additional milestone branches were used to land concrete product surfaces:
+
+- `v7.0`: safety and permission upgrades
+- `v8.0`: tooling upgrades
+- `v9.0`: coordination and worktree upgrades
+- `v10.0`: OAuth, transcript, and memory upgrades
+- `v11.0`: active integration line for docs, plugin marketplace, voice, swarm, and newer product surfaces
 
 ## Notes
 

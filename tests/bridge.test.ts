@@ -240,6 +240,20 @@ test('HTTP bridge serves dynamic docs site', async () => {
   }
 });
 
+test('HTTP bridge serves local docs pages from the active workspace docs index', async () => {
+  const ctx = await makeBridge();
+  try {
+    const res = await fetch(`${ctx.bridge.url}/docs/page?name=readme`);
+    const html = await res.text();
+    assert.equal(res.status, 200);
+    assert.match(html, /Back to Dynamic Docs/);
+    assert.match(html, /README/);
+    assert.match(html, /StarkHarness/);
+  } finally {
+    await closeBridge(ctx);
+  }
+});
+
 test('HTTP bridge dispatches command', async () => {
   const ctx = await makeBridge();
   try {

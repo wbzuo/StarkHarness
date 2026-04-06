@@ -7,7 +7,12 @@
 
 import { createServer } from 'node:http';
 import { randomBytes, createHash } from 'node:crypto';
-import { createDocsSiteHtml } from '../ui/site.js';
+import { readFile } from 'node:fs/promises';
+import nodePath from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { DOC_PAGES, createDocsSiteHtml, createDocPageHtml } from '../ui/site.js';
+
+const REPO_ROOT = fileURLToPath(new URL('../..', import.meta.url));
 
 function parseBody(req) {
   return new Promise((resolve, reject) => {
@@ -174,6 +179,17 @@ export async function createHttpBridge(runtime, { port = 3000, host = '127.0.0.1
     try {
       if (path === '/docs' && req.method === 'GET') {
         const html = createDocsSiteHtml({ runtime });
+        res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+        res.end(html);
+        return;
+      }
+      if (path === '/docs/page' && req.method === 'GET') {
+        const name = url.searchParams.get('name') ?? 'readme';
+        const page = DOC_PAGES.find((entry) => entry.id === name);
+        if (!page) return json(res, { error: 'doc-not-found' }, 404);
+        const filePath = nodePath.join(REPO_ROOT, page.path);
+        const content = await readFile(filePath, 'utf8');
+        const html = createDocPageHtml({ title: page.title, content });
         res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
         res.end(html);
         return;
