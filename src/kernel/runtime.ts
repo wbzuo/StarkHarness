@@ -39,11 +39,20 @@ import { createFeatureFlagManager } from '../enterprise/growthbook.js';
 import { mergeManagedSettingsIntoEnv, fetchManagedSettings } from '../config/managed.js';
 import { describeRemoteBridge, emitRemoteBridgeEvent, pollRemoteBridge, startRemoteBridge, stopRemoteBridge } from '../bridge/remote.js';
 
-const COORDINATOR_ALLOWED_TOOLS = new Set([
-  'spawn_agent',
-  'send_message',
-  'tasks',
-]);
+const COORDINATOR_ALLOWED_TOOLS = new Set(['spawn_agent', 'send_message', 'tasks']);
+
+const MODE_CONFIG = {
+  interactive: { promptSuffix: null, restrictTools: false },
+  plan: {
+    promptSuffix: '# Plan Mode\nYou are in read-only planning mode. Do not edit files or execute mutating work. Produce plans, analysis, and implementation guidance only.',
+    restrictTools: false,
+  },
+  coordinator: {
+    promptSuffix: '# Coordinator Mode\nYou are in coordinator mode. Prefer delegating work, coordinating agents, and synthesizing results over directly performing implementation work yourself.',
+    restrictTools: true,
+    allowedTools: COORDINATOR_ALLOWED_TOOLS,
+  },
+};
 
 function parseEverySchedule(schedule = '') {
   const match = String(schedule).trim().match(/^@every:(\d+)(ms|s|m|h)$/);
@@ -502,23 +511,22 @@ export async function createRuntime(options = {}) {
       const effectiveSystemPrompt = binding
         ? `${this.context.systemPrompt}${binding.promptAddendum}`
         : this.context.systemPrompt;
-      const modePrompt = this.session.mode === 'plan'
-        ? `${effectiveSystemPrompt}\n\n# Plan Mode\nYou are in read-only planning mode. Do not edit files or execute mutating work. Produce plans, analysis, and implementation guidance only.`
-        : this.session.mode === 'coordinator'
-          ? `${effectiveSystemPrompt}\n\n# Coordinator Mode\nYou are in coordinator mode. Prefer delegating work, coordinating agents, and synthesizing results over directly performing implementation work yourself.`
-          : effectiveSystemPrompt;
+      const mode = MODE_CONFIG[this.session.mode] ?? MODE_CONFIG.interactive;
+      const modePrompt = mode.promptSuffix
+        ? `${effectiveSystemPrompt}\n\n${mode.promptSuffix}`
+        : effectiveSystemPrompt;
       const previousActiveSkill = this.context.activeSkill ?? null;
       this.context.activeSkill = binding?.path
         ? { name: binding.name, dir: binding.path }
         : null;
-      const scopedTools = this.session.mode === 'coordinator'
+      const scopedTools = mode.restrictTools
         ? (() => {
           const registry = new ToolRegistry();
-          registry.registerMany(this.tools.list().filter((tool) => COORDINATOR_ALLOWED_TOOLS.has(tool.name)));
+          registry.registerMany(this.tools.list().filter((tool) => mode.allowedTools.has(tool.name)));
           return registry;
         })()
         : this.tools;
-      const scopedRunner = this.session.mode === 'coordinator'
+      const scopedRunner = mode.restrictTools
         ? (() => {
           const runner = new AgentRunner({
             provider: {

@@ -1,5 +1,6 @@
 import { readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
+import { PROVIDER_ENV_KEYS, readProviderEnv, allProviderIds } from './provider-keys.js';
 
 function parseBoolean(value, fallback = false) {
   if (value == null) return fallback;
@@ -57,23 +58,7 @@ export async function loadRuntimeEnv({ cwd = process.cwd(), envFilePath = null, 
   return {
     raw,
     filePath,
-    providers: {
-      anthropic: {
-        apiKey: raw.ANTHROPIC_API_KEY ?? null,
-        baseUrl: raw.ANTHROPIC_BASE_URL ?? null,
-        model: raw.ANTHROPIC_MODEL ?? null,
-      },
-      openai: {
-        apiKey: raw.OPENAI_API_KEY ?? null,
-        baseUrl: raw.OPENAI_BASE_URL ?? null,
-        model: raw.OPENAI_MODEL ?? null,
-      },
-      compatible: {
-        apiKey: raw.COMPATIBLE_API_KEY ?? null,
-        baseUrl: raw.COMPATIBLE_BASE_URL ?? null,
-        model: raw.COMPATIBLE_MODEL ?? null,
-      },
-    },
+    providers: Object.fromEntries(allProviderIds().map((id) => [id, readProviderEnv(raw, id)])),
     bridge: {
       host: raw.STARKHARNESS_BRIDGE_HOST ?? '127.0.0.1',
       port: parseNumber(raw.STARKHARNESS_BRIDGE_PORT, 3000),

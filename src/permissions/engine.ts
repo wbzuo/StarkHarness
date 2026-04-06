@@ -1,6 +1,7 @@
 import { DEFAULT_POLICY, mergePolicy } from './policy.js';
 import path from 'node:path';
 import { classifyBashCommand } from '../security/bashClassifier.js';
+import { globToRegExp, normalizePathForMatch } from '../utils/glob.js';
 
 function resolveToolDecision(toolRule, capability) {
   if (!toolRule) return null;
@@ -9,36 +10,8 @@ function resolveToolDecision(toolRule, capability) {
   return null;
 }
 
-function escapeRegex(value) {
-  return value.replace(/[|\\{}()[\]^$+?.]/g, '\\$&');
-}
-
-function globToRegExp(pattern) {
-  let regex = '^';
-  for (let index = 0; index < pattern.length; index += 1) {
-    const char = pattern[index];
-    const next = pattern[index + 1];
-    if (char === '*' && next === '*') {
-      regex += '.*';
-      index += 1;
-      continue;
-    }
-    if (char === '*') {
-      regex += '[^/]*';
-      continue;
-    }
-    if (char === '?') {
-      regex += '[^/]';
-      continue;
-    }
-    regex += escapeRegex(char);
-  }
-  regex += '$';
-  return new RegExp(regex);
-}
-
 function normalizePath(value) {
-  return String(value).split(path.sep).join('/');
+  return normalizePathForMatch(String(value));
 }
 
 function collectPaths(toolInput = {}) {

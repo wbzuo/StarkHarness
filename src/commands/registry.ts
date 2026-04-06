@@ -5,6 +5,7 @@ import { createReplayPlan, evaluateReplayPlan } from '../replay/runner.js';
 import { getWebAccessStatus } from '../web-access/index.js';
 import { listStarterApps, scaffoldApp } from '../app/scaffold.js';
 import { writeEnvValues, removeEnvKeys } from '../config/env.js';
+import { envKeysForProvider, PROVIDER_ENV_KEYS } from '../config/provider-keys.js';
 import { mkdir } from 'node:fs/promises';
 import path from 'node:path';
 import { execFile } from 'node:child_process';
@@ -17,6 +18,8 @@ import { packagePluginAsDxt, validateDxtPackage, installDxtPackage } from '../pl
 import { startTui } from '../ui/tui.js';
 import { launchTmuxSwarm, listTmuxSwarms, stopTmuxSwarm } from '../swarm/tmux.js';
 import { writeFile, rm } from 'node:fs/promises';
+import { createPassthroughCommands } from './passthrough.js';
+import { createModeCommands } from './mode.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -261,6 +264,8 @@ async function executeSwarm(runtime, tasks, agents, { parallel = true } = {}) {
 
 export function createCommandRegistry() {
   return [
+    ...createPassthroughCommands(),
+    ...createModeCommands(),
     {
       name: 'blueprint',
       description: 'Print module blueprint',
@@ -301,21 +306,6 @@ export function createCommandRegistry() {
       },
     },
     {
-      name: 'file-cache-status',
-      description: 'Show workspace file-cache statistics',
-      async execute(runtime) {
-        return runtime.fileCache?.status?.() ?? null;
-      },
-    },
-    {
-      name: 'file-cache-clear',
-      description: 'Clear the workspace file state cache',
-      async execute(runtime) {
-        runtime.fileCache?.clear?.();
-        return runtime.fileCache?.status?.() ?? null;
-      },
-    },
-    {
       name: 'settings-status',
       description: 'Show managed settings configuration and persisted snapshot summary',
       async execute(runtime) {
@@ -342,41 +332,6 @@ export function createCommandRegistry() {
           keys: Object.keys(snapshot ?? {}),
           snapshot,
         };
-      },
-    },
-    {
-      name: 'remote-status',
-      description: 'Show remote bridge client status',
-      async execute(runtime) {
-        return runtime.describeRemoteBridge?.() ?? null;
-      },
-    },
-    {
-      name: 'remote-connect',
-      description: 'Start the remote bridge polling client',
-      async execute(runtime) {
-        return runtime.startRemoteBridge?.();
-      },
-    },
-    {
-      name: 'remote-disconnect',
-      description: 'Stop the remote bridge polling client',
-      async execute(runtime) {
-        return runtime.stopRemoteBridge?.();
-      },
-    },
-    {
-      name: 'remote-poll',
-      description: 'Poll the remote bridge endpoint once and execute any returned payload',
-      async execute(runtime) {
-        return runtime.pollRemoteBridge?.();
-      },
-    },
-    {
-      name: 'voice-status',
-      description: 'Show configured voice/transcription provider status',
-      async execute(runtime) {
-        return runtime.voice ?? describeVoice(runtime.env);
       },
     },
     {
@@ -544,27 +499,6 @@ export function createCommandRegistry() {
       },
     },
     {
-      name: 'swarm-terminal-status',
-      description: 'Show tracked tmux swarm sessions and live tmux discovery',
-      async execute(runtime) {
-        return {
-          persisted: await runtime.state.loadSwarmSessions(),
-          live: await listTmuxSwarms(),
-        };
-      },
-    },
-    {
-      name: 'swarm-terminal-stop',
-      description: 'Stop a tmux-backed swarm session',
-      async execute(runtime, args = {}) {
-        if (!args.id) throw new Error('swarm-terminal-stop requires --id');
-        const result = await stopTmuxSwarm({ id: args.id });
-        const current = await runtime.state.loadSwarmSessions();
-        await runtime.state.saveSwarmSessions(current.filter((entry) => entry.sessionName !== result.sessionName));
-        return result;
-      },
-    },
-    {
       name: 'swarm-launch',
       description: 'Launch a multi-terminal swarm through tmux',
       async execute(runtime, args = {}) {
@@ -613,73 +547,6 @@ export function createCommandRegistry() {
       },
     },
     {
-      name: 'enter-coordinator-mode',
-      description: 'Switch the session into coordinator mode for delegation-first orchestration',
-      async execute(runtime) {
-        runtime.session.mode = 'coordinator';
-        runtime.context.mode = 'coordinator';
-        await runtime.persist();
-        return { ok: true, mode: runtime.session.mode };
-      },
-    },
-    {
-      name: 'exit-coordinator-mode',
-      description: 'Exit coordinator mode and return to interactive mode',
-      async execute(runtime) {
-        runtime.session.mode = 'interactive';
-        runtime.context.mode = 'interactive';
-        await runtime.persist();
-        return { ok: true, mode: runtime.session.mode };
-      },
-    },
-    {
-      name: 'coordinator-status',
-      description: 'Show whether coordinator mode is active',
-      async execute(runtime) {
-        return {
-          enabled: runtime.session.mode === 'coordinator',
-          mode: runtime.session.mode,
-        };
-      },
-    },
-    {
-      name: 'enter-plan-mode',
-      description: 'Switch the session into read-only planning mode',
-      async execute(runtime) {
-        runtime.session.mode = 'plan';
-        runtime.context.mode = 'plan';
-        await runtime.persist();
-        return { ok: true, mode: runtime.session.mode };
-      },
-    },
-    {
-      name: 'exit-plan-mode',
-      description: 'Exit read-only planning mode and return to interactive mode',
-      async execute(runtime) {
-        runtime.session.mode = 'interactive';
-        runtime.context.mode = 'interactive';
-        await runtime.persist();
-        return { ok: true, mode: runtime.session.mode };
-      },
-    },
-    {
-      name: 'plan-status',
-      description: 'Show whether plan mode is currently active',
-      async execute(runtime) {
-        return {
-          enabled: runtime.session.mode === 'plan',
-          mode: runtime.session.mode,
-        };
-      },
-    },
-    {
-      name: 'starter-apps',
-      description: 'List available starter app templates',
-      async execute() {
-        return listStarterApps();
-      },
-    },
-    {
       name: 'init',
       description: 'Scaffold a starter StarkHarness app into a target directory',
       async execute(_runtime, args = {}) {
@@ -688,58 +555,6 @@ export function createCommandRegistry() {
           template: args.template ?? 'browser-research',
           force: args.force === 'true',
         });
-      },
-    },
-    {
-      name: 'app-status',
-      description: 'Show the currently loaded app manifest metadata',
-      async execute(runtime) {
-        return runtime.app ?? null;
-      },
-    },
-    {
-      name: 'env-status',
-      description: 'Show loaded environment configuration and feature switches',
-      async execute(runtime) {
-        return runtime.env ? {
-          filePath: runtime.env.filePath ?? null,
-          features: runtime.env.features,
-          bridge: runtime.env.bridge,
-          telemetry: runtime.env.telemetry,
-          providers: Object.fromEntries(
-            Object.entries(runtime.env.providers).map(([providerId, provider]) => [
-              providerId,
-              {
-                configured: Boolean(provider.apiKey),
-                baseUrl: provider.baseUrl ?? null,
-                model: provider.model ?? null,
-              },
-            ]),
-          ),
-        } : null;
-      },
-    },
-    {
-      name: 'login-status',
-      description: 'Show provider/login readiness for configured model backends',
-      async execute(runtime) {
-        return runtime.env ? {
-          anthropic: {
-            configured: Boolean(runtime.env.providers.anthropic.apiKey),
-            baseUrl: runtime.env.providers.anthropic.baseUrl ?? null,
-            model: runtime.env.providers.anthropic.model ?? null,
-          },
-          openai: {
-            configured: Boolean(runtime.env.providers.openai.apiKey),
-            baseUrl: runtime.env.providers.openai.baseUrl ?? null,
-            model: runtime.env.providers.openai.model ?? null,
-          },
-          compatible: {
-            configured: Boolean(runtime.env.providers.compatible.apiKey),
-            baseUrl: runtime.env.providers.compatible.baseUrl ?? null,
-            model: runtime.env.providers.compatible.model ?? null,
-          },
-        } : null;
       },
     },
     {
@@ -800,26 +615,7 @@ export function createCommandRegistry() {
           };
         }
         const provider = args.provider ?? 'openai';
-        const keyMap = {
-          anthropic: {
-            apiKey: 'ANTHROPIC_API_KEY',
-            baseUrl: 'ANTHROPIC_BASE_URL',
-            model: 'ANTHROPIC_MODEL',
-          },
-          openai: {
-            apiKey: 'OPENAI_API_KEY',
-            baseUrl: 'OPENAI_BASE_URL',
-            model: 'OPENAI_MODEL',
-          },
-          compatible: {
-            apiKey: 'COMPATIBLE_API_KEY',
-            baseUrl: 'COMPATIBLE_BASE_URL',
-            model: 'COMPATIBLE_MODEL',
-          },
-        }[provider];
-        if (!keyMap) {
-          throw new Error(`Unsupported provider for login: ${provider}`);
-        }
+        const keyMap = envKeysForProvider(provider);
         const filePath = await writeEnvValues({
           cwd: runtime.app?.rootDir ?? runtime.context.cwd,
           envFilePath: runtime.app?.paths?.envPath ?? null,
@@ -888,18 +684,11 @@ export function createCommandRegistry() {
       description: 'Remove provider credentials/config from the app or workspace env file and reload runtime providers',
       async execute(runtime, args = {}) {
         const provider = args.provider ?? 'openai';
-        const keyMap = {
-          anthropic: ['ANTHROPIC_API_KEY', 'ANTHROPIC_BASE_URL', 'ANTHROPIC_MODEL'],
-          openai: ['OPENAI_API_KEY', 'OPENAI_BASE_URL', 'OPENAI_MODEL'],
-          compatible: ['COMPATIBLE_API_KEY', 'COMPATIBLE_BASE_URL', 'COMPATIBLE_MODEL'],
-        }[provider];
-        if (!keyMap) {
-          throw new Error(`Unsupported provider for logout: ${provider}`);
-        }
+        const keys = envKeysForProvider(provider);
         const filePath = await removeEnvKeys({
           cwd: runtime.app?.rootDir ?? runtime.context.cwd,
           envFilePath: runtime.app?.paths?.envPath ?? null,
-          keys: keyMap,
+          keys: Object.values(keys),
         });
         await runtime.reloadEnvAndProviders();
         return {
@@ -907,16 +696,6 @@ export function createCommandRegistry() {
           provider,
           filePath,
           status: await runtime.dispatchCommand('login-status'),
-        };
-      },
-    },
-    {
-      name: 'observability-status',
-      description: 'Show enterprise observability integration status',
-      async execute(runtime) {
-        return {
-          observability: runtime.observability?.status?.() ?? null,
-          telemetry: runtime.env?.telemetry ?? null,
         };
       },
     },
@@ -1065,13 +844,6 @@ export function createCommandRegistry() {
       },
     },
     {
-      name: 'feature-flags',
-      description: 'Show the current merged feature flags from env and remote config',
-      async execute(runtime) {
-        return runtime.featureFlags?.getAll?.() ?? {};
-      },
-    },
-    {
       name: 'growthbook-sync',
       description: 'Refresh remote feature flags from a configured GrowthBook endpoint',
       async execute(runtime) {
@@ -1092,13 +864,6 @@ export function createCommandRegistry() {
       },
     },
     {
-      name: 'resume',
-      description: 'Load the current session snapshot',
-      async execute(runtime) {
-        return runtime.state.loadSession(runtime.session.id);
-      },
-    },
-    {
       name: 'session-summary',
       description: 'Summarize the current resumed session',
       async execute(runtime) {
@@ -1110,41 +875,6 @@ export function createCommandRegistry() {
       description: 'Load the persisted session transcript entries',
       async execute(runtime, args = {}) {
         return runtime.state.loadSessionTranscript(args.sessionId ?? runtime.session.id);
-      },
-    },
-    {
-      name: 'sessions',
-      description: 'List persisted sessions',
-      async execute(runtime) {
-        return runtime.state.listSessions();
-      },
-    },
-    {
-      name: 'providers',
-      description: 'List registered providers',
-      async execute(runtime) {
-        return runtime.providers.list();
-      },
-    },
-    {
-      name: 'provider-config',
-      description: 'Show loaded provider configuration summary',
-      async execute(runtime) {
-        return runtime.providers.describeConfig();
-      },
-    },
-    {
-      name: 'tasks',
-      description: 'List persisted tasks',
-      async execute(runtime) {
-        return runtime.tasks.list();
-      },
-    },
-    {
-      name: 'agents',
-      description: 'List persisted agents',
-      async execute(runtime) {
-        return runtime.agents.list();
       },
     },
     {
@@ -1167,13 +897,6 @@ export function createCommandRegistry() {
       },
     },
     {
-      name: 'mailbox',
-      description: 'Show mailbox queue and pending-response diagnostics',
-      async execute(runtime) {
-        return runtime.inbox.stats();
-      },
-    },
-    {
       name: 'repl',
       description: 'Start the interactive StarkHarness REPL',
       async execute(runtime) {
@@ -1186,13 +909,6 @@ export function createCommandRegistry() {
       description: 'Start the rich terminal dashboard UI',
       async execute(runtime) {
         return startTui(runtime);
-      },
-    },
-    {
-      name: 'workers',
-      description: 'List active agent inbox workers',
-      async execute(runtime) {
-        return runtime.listWorkers();
       },
     },
     {
@@ -1248,13 +964,6 @@ export function createCommandRegistry() {
           tools: runtime.plugins.listTools(),
           diagnostics: runtime.pluginDiagnostics,
         };
-      },
-    },
-    {
-      name: 'profiles',
-      description: 'List available sandbox profiles',
-      async execute() {
-        return listSandboxProfiles();
       },
     },
     {
@@ -1494,20 +1203,6 @@ export function createCommandRegistry() {
       },
     },
     {
-      name: 'todos',
-      description: 'List persisted user-facing todos for the current workspace',
-      async execute(runtime) {
-        return runtime.state.loadTodos();
-      },
-    },
-    {
-      name: 'cron-list',
-      description: 'List persisted cron schedules',
-      async execute(runtime) {
-        return runtime.state.loadCrons();
-      },
-    },
-    {
       name: 'cron-create',
       description: 'Persist a cron-like scheduled task definition',
       async execute(runtime, args = {}) {
@@ -1523,14 +1218,6 @@ export function createCommandRegistry() {
         current.push(entry);
         await runtime.state.saveCrons(current);
         return entry;
-      },
-    },
-    {
-      name: 'cron-run-due',
-      description: 'Run due background cron jobs immediately',
-      async execute(runtime) {
-        await runtime.tickBackgroundJobs?.();
-        return runtime.state.loadCrons();
       },
     },
     {
