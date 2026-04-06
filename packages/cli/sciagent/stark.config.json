@@ -1,0 +1,9 @@
+{
+  "name": "sciagent",
+  "type": "ts",
+  "features": {
+    "mcp": true,
+    "multiAgent": true
+  },
+  "createdAt": "2026-04-06T07:49:36.719Z"
+}

@@ -183,6 +183,14 @@ export async function createHttpBridge(runtime, { port = 3000, host = '127.0.0.1
         res.end(html);
         return;
       }
+      if (path === '/inspect' && req.method === 'GET') {
+        const { createInspectorHtml } = await import('../ui/inspector.js');
+        const wsUrl = `ws://${req.headers.host ?? `${host}:${port}`}/ws`;
+        const html = createInspectorHtml({ wsUrl });
+        res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+        res.end(html);
+        return;
+      }
       if (path === '/docs/page' && req.method === 'GET') {
         const name = url.searchParams.get('name') ?? 'readme';
         const page = DOC_PAGES.find((entry) => entry.id === name);

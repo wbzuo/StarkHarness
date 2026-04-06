@@ -103,6 +103,7 @@ async function main(argv = process.argv.slice(2)) {
       console.log(`App: ${app.name} (${app.manifestPath})`);
     }
     console.log(`WebSocket: ${bridge.wsUrl}`);
+    console.log(`Inspector: ${bridge.url}/inspect`);
     console.log(`POST /run { "prompt": "..." } to chat`);
     console.log(`POST /stream { "prompt": "..." } for SSE streaming`);
     console.log(`GET /health, /session, /providers, /tools, /agents, /tasks, /traces`);

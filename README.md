@@ -58,9 +58,10 @@ Built for the future of UI:
 - **GrowthBook Integration**: Built-in support for feature flags and A/B testing of agent behaviors.
 - **Observability**: Industrial-grade tracing and metrics for tracking agent performance at scale.
 
-### 🛠️ 4. Developer Tools Integration (`src/lsp/`, `src/ui/tui.ts`)
+### 🛠️ 4. Developer Tools Integration (`src/lsp/`, `src/ui/`)
 - **LSP Support**: Language Server Protocol integration for rich codebase diagnostics.
 - **Pro TUI**: A full-featured terminal UI implementation for a high-intensity developer experience.
+- **Web Inspector**: Real-time visual dashboard at `http://127.0.0.1:3000/inspect` for tracing hooks, tokens, and multi-agent loops.
 
 ---
 
@@ -73,17 +74,17 @@ Requires **Node.js 20+** and **TypeScript 6.0**.
 git clone https://github.com/wbzuo/StarkHarness.git
 cd StarkHarness/Codex
 
-# 2. Run with tsx (Zero build-step development)
-npm start
+# 2. Install dependencies (if you run locally without pre-built bundles)
+npm install
 
-# 3. Check health and surfaces
-npm run doctor
+# 3. Setup CLI globally
+cd packages/cli && npm link && cd ../..
 
-# 4. Run industrial-grade tests
-npm test
+# 4. Scaffolding your first agent
+stark init
 
-# 5. Perform static type checking
-npm run typecheck
+# 5. Start the Web Inspector and Bridge
+stark inspect
 ```
 
 ---

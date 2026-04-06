@@ -1,0 +1,22 @@
+{
+  "name": "@starkharness/cli",
+  "version": "0.1.0",
+  "description": "Official CLI for StarkHarness Agent Operating System",
+  "type": "module",
+  "bin": {
+    "stark": "bin/stark.mjs"
+  },
+  "scripts": {
+    "start": "node --import tsx ./src/index.ts"
+  },
+  "dependencies": {
+    "tsx": "^4.21.0"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "main": "index.js",
+  "keywords": [],
+  "author": "",
+  "license": "ISC"
+}
