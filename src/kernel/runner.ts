@@ -1,7 +1,7 @@
 // maxTurns limits total tool executions, not API round-trips.
 // A single response with N tool_use blocks counts as N turns.
 import { tokenizeForStreaming } from '../utils/text.js';
-import { compactMessages } from './context.js';
+import { compactMessages, estimateTokens, summarizeMessages } from './context.js';
 
 const DEFAULT_MAX_TURNS = 25;
 const DEFAULT_COMPACT_THRESHOLD = 60000;
@@ -36,9 +36,9 @@ export class AgentRunner {
     for (let i = 0; i < maxApiCalls; i++) {
       // Auto-compact when messages grow beyond threshold
       if (compactThreshold > 0 && messages.length > 4) {
-        const result = compactMessages(messages, { maxTokens: compactThreshold });
+        const result = await this.#compactMessagesWithLlm(messages, { maxTokens: compactThreshold });
         if (result.compacted) {
-          await this.hooks.fire('PreCompact', { messageCount: messages.length, removed: result.removed, estimatedTokens: result.estimatedTokens });
+          await this.hooks.fire('PreCompact', { messageCount: messages.length, removed: result.removed, estimatedTokens: result.estimatedTokens, strategy: result.strategy ?? 'mechanical' });
           messages = result.messages;
           compactions++;
         }
@@ -114,7 +114,7 @@ export class AgentRunner {
     if (!tool) return { ok: false, reason: 'unknown-tool', tool: toolCall.name };
 
     // Permission check
-    const gate = permissions.evaluate({ capability: tool.capability, toolName: tool.name });
+    const gate = permissions.evaluate({ capability: tool.capability, toolName: tool.name, toolInput: toolCall.input, cwd: this._runtime?.context?.cwd });
     if (gate.decision === 'deny') return { ok: false, reason: 'permission-denied', tool: toolCall.name, gate };
     if (gate.decision === 'ask') return { ok: false, reason: 'permission-escalation-required', tool: toolCall.name, gate };
 
@@ -135,5 +135,41 @@ export class AgentRunner {
 
   setRuntime(runtime) {
     this._runtime = runtime;
+  }
+
+  async #compactMessagesWithLlm(messages, { maxTokens = DEFAULT_COMPACT_THRESHOLD, keepRecent = 6 } = {}) {
+    const estimate = estimateTokens(messages);
+    if (estimate < maxTokens) {
+      return { compacted: false, messages, removed: 0, estimatedTokens: estimate, strategy: 'none' };
+    }
+
+    const keep = Math.max(keepRecent, Math.floor(messages.length * 0.25));
+    const removed = messages.slice(0, -keep);
+    let summary = '';
+
+    try {
+      const serialized = removed
+        .map((message) => `${message.role.toUpperCase()}: ${typeof message.content === 'string' ? message.content : JSON.stringify(message.content)}`)
+        .join('\n\n');
+      const response = await this.provider.complete({
+        systemPrompt: 'Summarize the earlier conversation context for continued agent work. Preserve user goals, files touched, tool usage, constraints, and unresolved work. Return only the summary.',
+        messages: [{ role: 'user', content: serialized }],
+        tools: [],
+      });
+      summary = response.text?.trim() ?? '';
+    } catch {}
+
+    const fallback = summarizeMessages(removed);
+    const result = compactMessages(messages, {
+      maxTokens,
+      keepRecent,
+      summaryOverride: summary
+        ? `[Context compacted with LLM summary]\n${summary}`
+        : fallback,
+    });
+    return {
+      ...result,
+      strategy: summary ? 'llm' : 'mechanical',
+    };
   }
 }

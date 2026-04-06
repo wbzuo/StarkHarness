@@ -7,6 +7,8 @@ export const DEFAULT_POLICY = Object.freeze({
   network: 'ask',
   delegate: 'allow',
   tools: {},
+  bashRules: [],
+  pathRules: [],
 });
 
 export function mergePolicy(base, override = {}) {
@@ -17,6 +19,14 @@ export function mergePolicy(base, override = {}) {
       ...(base.tools ?? {}),
       ...(override.tools ?? {}),
     },
+    bashRules: [
+      ...(base.bashRules ?? []),
+      ...(override.bashRules ?? []),
+    ],
+    pathRules: [
+      ...(base.pathRules ?? []),
+      ...(override.pathRules ?? []),
+    ],
   };
 }
 

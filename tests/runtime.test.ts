@@ -80,6 +80,45 @@ test('tool-scoped policy overrides capability decisions', async () => {
   assert.equal(result.gate.source, 'tool');
 });
 
+test('bash classifier blocks destructive shell commands even when exec is allowed', async () => {
+  const { runtime } = await makeRuntime({
+    permissions: { exec: 'allow' },
+  });
+  const result = await runHarnessTurn(runtime, {
+    tool: 'shell',
+    input: { command: 'rm -rf /' },
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.reason, 'permission-denied');
+  assert.equal(result.gate.source, 'bash-classifier');
+});
+
+test('path rules can deny writes to sensitive locations', async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'starkharness-path-rule-'));
+  const policyPath = path.join(root, 'policy.json');
+  await writeFile(policyPath, JSON.stringify({
+    write: 'allow',
+    pathRules: [
+      { pattern: 'secrets/**', write: 'deny' },
+    ],
+  }), 'utf8');
+
+  const runtime = await createRuntime({
+    stateDir: path.join(root, '.starkharness'),
+    session: { cwd: root, goal: 'path-rule-runtime' },
+    policyPath,
+  });
+
+  const result = await runHarnessTurn(runtime, {
+    tool: 'write_file',
+    input: { path: 'secrets/prod.env', content: 'token=123' },
+  });
+  assert.equal(result.ok, false);
+  assert.equal(result.reason, 'permission-denied');
+  assert.equal(result.gate.source, 'path-rule');
+});
+
 test('allowing read tools executes successfully', async () => {
   const { runtime } = await makeRuntime();
   const result = await runHarnessTurn(runtime, {
@@ -581,6 +620,17 @@ test('web-access-status command reports bundled skill metadata', async () => {
   assert.equal(status.scripts.checkDeps, true);
   assert.equal(status.scripts.cdpProxy, true);
   assert.equal(status.scripts.matchSite, true);
+  await runtime.shutdown();
+});
+
+test('status command returns a consolidated runtime view', async () => {
+  const { runtime } = await makeRuntime();
+  const status = await runtime.dispatchCommand('status');
+  assert.equal(typeof status.counts.tools, 'number');
+  assert.equal(typeof status.counts.commands, 'number');
+  assert.equal(typeof status.providers.openai, 'boolean');
+  assert.equal(typeof status.features.remoteControl, 'boolean');
+  assert.equal(typeof status.webAccess.available, 'boolean');
   await runtime.shutdown();
 });
 
