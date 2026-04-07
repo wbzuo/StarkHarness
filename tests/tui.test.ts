@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { renderTuiDashboard } from '../src/ui/tui.js';
+import { stripAnsi } from '../src/ui/theme.js';
 
 test('renderTuiDashboard includes the main product panels', () => {
   const output = renderTuiDashboard({
@@ -15,10 +16,15 @@ test('renderTuiDashboard includes the main product panels', () => {
     swarms: [{ id: 'swarm-1' }],
   });
 
-  assert.match(output, /StarkHarness TUI/);
-  assert.match(output, /Overview/);
-  assert.match(output, /Counts/);
-  assert.match(output, /Bridge and Remote/);
-  assert.match(output, /remote\.example\.com/);
-  assert.match(output, /Visual Notes/);
+  const plain = stripAnsi(output);
+  assert.match(plain, /StarkHarness/);
+  assert.match(plain, /Overview/);
+  assert.match(plain, /Counts/);
+  assert.match(plain, /Bridge & Remote/);
+  assert.match(plain, /remote\.example\.com/);
+  assert.match(plain, /:status/);
+  assert.match(plain, /sess-1/);
+  assert.match(plain, /interactive/);
+  assert.match(plain, /openai/);
+  assert.match(plain, /swarm-1/);
 });

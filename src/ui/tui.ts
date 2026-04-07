@@ -1,53 +1,54 @@
 import readline from 'node:readline/promises';
 import { stdin as input, stdout as output } from 'node:process';
+import {
+  bold, dim, cyan, green, yellow, red, gray,
+  FIGURES, renderBox, boldCyan, dimGray,
+} from './theme.js';
+import { formatStatusLine, formatError, formatHelp } from './renderer.js';
 
 function clearScreen(outputStream) {
   outputStream.write('\x1bc');
 }
 
-function renderPanel(title, body) {
-  return `== ${title} ==\n${body}`;
-}
-
 function renderLine(label, value) {
-  return `${label.padEnd(14)} ${value}`;
+  return `${dim(label.padEnd(14))} ${value}`;
 }
 
 function formatFlagSet(flags = {}) {
   const entries = Object.entries(flags);
-  if (entries.length === 0) return 'none';
-  return entries.map(([name, enabled]) => `${name}:${enabled ? 'on' : 'off'}`).join(' | ');
+  if (entries.length === 0) return dim('none');
+  return entries.map(([name, enabled]) =>
+    enabled ? green(`${name}`) : dimGray(name)
+  ).join(dim(' | '));
 }
 
 function formatProviderSet(providers = {}) {
   const entries = Object.entries(providers);
-  if (entries.length === 0) return 'none';
-  return entries.map(([name, enabled]) => `${name}:${enabled ? 'ready' : 'off'}`).join(' | ');
+  if (entries.length === 0) return dim('none');
+  return entries.map(([name, enabled]) =>
+    enabled ? green(`${name}${dim(':ready')}`) : dimGray(`${name}:off`)
+  ).join(dim(' | '));
 }
 
 function formatRemote(status = {}) {
   const remoteUrl = status.remoteBridge?.url ?? status.bridge?.remoteUrl ?? status.bridge?.remoteBridgeUrl ?? null;
-  if (!remoteUrl) return 'disabled';
+  if (!remoteUrl) return dim('disabled');
   const mode = status.remoteBridge?.mode ?? 'configured';
-  const connected = status.remoteBridge?.connected === true ? 'connected' : 'idle';
-  return `${mode}:${connected} ${remoteUrl}`;
+  const connected = status.remoteBridge?.connected === true;
+  return `${connected ? green('connected') : yellow('idle')} ${dim(remoteUrl)}`;
 }
 
 function formatSwarms(swarms = []) {
-  if (!Array.isArray(swarms) || swarms.length === 0) return 'none';
-  return swarms.map((swarm) => swarm.id ?? swarm.sessionName ?? 'swarm').join(', ');
+  if (!Array.isArray(swarms) || swarms.length === 0) return dim('none');
+  return swarms.map((swarm) => cyan(swarm.id ?? swarm.sessionName ?? 'swarm')).join(dim(', '));
 }
 
 function formatFileCache(fileCache) {
-  if (!fileCache) return 'not initialized';
+  if (!fileCache) return dim('not initialized');
   const hits = Number(fileCache.hits ?? 0);
   const misses = Number(fileCache.misses ?? 0);
   const entries = Number(fileCache.entries ?? fileCache.files ?? 0);
-  return `entries:${entries} | hits:${hits} | misses:${misses}`;
-}
-
-function createSection(title, lines) {
-  return renderPanel(title, lines.join('\n'));
+  return `${dim('entries:')}${entries} ${dim('|')} ${green(`hits:${hits}`)} ${dim('|')} ${dimGray(`misses:${misses}`)}`;
 }
 
 export function renderTuiDashboard(status = {}) {
@@ -57,46 +58,41 @@ export function renderTuiDashboard(status = {}) {
   const bridge = status.bridge ?? {};
   const voice = status.voice ?? {};
   const webAccess = status.webAccess ?? {};
+
   const lines = [
-    'StarkHarness TUI',
-    '================================================================',
     '',
-    createSection('Overview', [
-      renderLine('Session', session.id ?? '-'),
-      renderLine('Mode', session.mode ?? '-'),
-      renderLine('Goal', session.goal ?? '-'),
-      renderLine('CWD', session.cwd ?? '-'),
-    ]),
+    `  ${boldCyan('StarkHarness')} ${dim('TUI Dashboard')}`,
+    `  ${dim(FIGURES.line.repeat(56))}`,
     '',
-    createSection('Counts', [
-      renderLine('Commands', String(counts.commands ?? 0)),
-      renderLine('Tools', String(counts.tools ?? 0)),
-      renderLine('Agents', String(counts.agents ?? 0)),
-      renderLine('Tasks', String(counts.tasks ?? 0)),
-      renderLine('Plugins', String(counts.plugins ?? 0)),
-    ]),
+    `  ${bold('Overview')}`,
+    `  ${renderLine('Session', cyan(session.id ?? '-'))}`,
+    `  ${renderLine('Mode', yellow(session.mode ?? '-'))}`,
+    `  ${renderLine('Goal', session.goal ?? '-')}`,
+    `  ${renderLine('CWD', dimGray(session.cwd ?? '-'))}`,
     '',
-    createSection('Runtime Surface', [
-      renderLine('Providers', formatProviderSet(status.providers ?? {})),
-      renderLine('Features', formatFlagSet(status.features ?? {})),
-      renderLine('Voice / Web', `voice:${voice.ready ? 'ready' : 'idle'} | web:${webAccess.ready ? 'ready' : 'idle'}`),
-      renderLine('File Cache', formatFileCache(status.fileCache)),
-    ]),
+    `  ${bold('Counts')}`,
+    `  ${renderLine('Commands', String(counts.commands ?? 0))}`,
+    `  ${renderLine('Tools', String(counts.tools ?? 0))}`,
+    `  ${renderLine('Agents', String(counts.agents ?? 0))}`,
+    `  ${renderLine('Tasks', String(counts.tasks ?? 0))}`,
+    `  ${renderLine('Plugins', String(counts.plugins ?? 0))}`,
     '',
-    createSection('Bridge and Remote', [
-      renderLine('Bridge', `${bridge.host ?? '127.0.0.1'}:${bridge.port ?? '-'} | auth:${bridge.authToken ? 'token' : 'open'}`),
-      renderLine('Remote', formatRemote(status)),
-      renderLine('Workers', `active:${workers.active ?? 0} | queued:${workers.queuedMessages ?? 0} | pending:${workers.pendingResponses ?? 0}`),
-      renderLine('Swarms', formatSwarms(status.swarms ?? [])),
-    ]),
+    `  ${bold('Runtime')}`,
+    `  ${renderLine('Providers', formatProviderSet(status.providers ?? {}))}`,
+    `  ${renderLine('Features', formatFlagSet(status.features ?? {}))}`,
+    `  ${renderLine('Voice', voice.ready ? green('ready') : dimGray('idle'))}`,
+    `  ${renderLine('Web Access', webAccess.ready ? green('ready') : dimGray('idle'))}`,
+    `  ${renderLine('File Cache', formatFileCache(status.fileCache))}`,
     '',
-    createSection('Visual Notes', [
-      renderLine('Inspector', 'Open /inspect in the bridge UI for trace-level browser monitoring'),
-      renderLine('Commands', ':status | :doctor | :registry | :clear | :help | :quit'),
-    ]),
+    `  ${bold('Bridge & Remote')}`,
+    `  ${renderLine('Bridge', `${dim(bridge.host ?? '127.0.0.1')}:${bridge.port ?? '-'} ${dim('|')} auth:${bridge.authToken ? green('token') : dimGray('open')}`)}`,
+    `  ${renderLine('Remote', formatRemote(status))}`,
+    `  ${renderLine('Workers', `${dim('active:')}${workers.active ?? 0} ${dim('|')} ${dim('queued:')}${workers.queuedMessages ?? 0}`)}`,
+    `  ${renderLine('Swarms', formatSwarms(status.swarms ?? []))}`,
     '',
-    'Prompt Mode',
-    '  Enter any non-command line to run it as a prompt against the active runtime.',
+    `  ${dim(FIGURES.line.repeat(56))}`,
+    `  ${dim('Commands:')} ${cyan(':status')} ${dim('|')} ${cyan(':doctor')} ${dim('|')} ${cyan(':registry')} ${dim('|')} ${cyan(':clear')} ${dim('|')} ${cyan(':help')} ${dim('|')} ${cyan(':quit')}`,
+    '',
   ];
 
   return lines.join('\n');
@@ -111,13 +107,13 @@ export async function startTui(runtime, { inputStream = input, outputStream = ou
   async function refresh() {
     const status = await runtime.dispatchCommand('status');
     clearScreen(outputStream);
-    outputStream.write(`${renderTuiDashboard(status)}\n\n`);
+    outputStream.write(renderTuiDashboard(status));
   }
 
   try {
     await refresh();
     while (true) {
-      const line = (await rl.question('tui> ')).trim();
+      const line = (await rl.question(`${cyan(FIGURES.pointer)} `)).trim();
       if (!line) continue;
       if (line === ':quit' || line === 'quit' || line === 'exit') break;
 
@@ -131,7 +127,7 @@ export async function startTui(runtime, { inputStream = input, outputStream = ou
         continue;
       }
       if (line === ':help') {
-        outputStream.write('Commands: :status, :doctor, :registry, :clear, :help, :quit\n\n');
+        outputStream.write(formatHelp());
         continue;
       }
       if (line === ':doctor') {

@@ -5,6 +5,7 @@ import path from 'node:path';
 import os from 'node:os';
 import { createRuntime } from '../src/kernel/runtime.js';
 import { renderTuiFrame } from '../src/ui/tui.js';
+import { stripAnsi } from '../src/ui/theme.js';
 import { buildTmuxSwarmPlan } from '../src/swarm/tmux.js';
 
 async function makeRuntime(root) {
@@ -54,9 +55,10 @@ test('renderTuiFrame summarizes product status in a terminal-friendly frame', ()
     workers: { active: 1 },
     swarms: [{ id: 'swarm-1' }],
   });
-  assert.match(frame, /StarkHarness TUI/);
-  assert.match(frame, /Session/);
-  assert.match(frame, /remote\.example\.com/);
+  const plain = stripAnsi(frame);
+  assert.match(plain, /StarkHarness/);
+  assert.match(plain, /Session/);
+  assert.match(plain, /remote\.example\.com/);
 });
 
 test('buildTmuxSwarmPlan creates tmux commands for multi-terminal swarms', () => {

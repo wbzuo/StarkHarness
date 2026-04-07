@@ -5,6 +5,7 @@ import { loadAppManifest } from './app/manifest.js';
 import { listStarterApps, scaffoldApp } from './app/scaffold.js';
 import { loadRuntimeEnv } from './config/env.js';
 import { createInteractivePromptSession } from './ui/prompts.js';
+import { bold, dim, cyan, FIGURES } from './ui/theme.js';
 
 function parseCommandArgs(argv) {
   const parsed = {};
@@ -98,15 +99,16 @@ async function main(argv = process.argv.slice(2)) {
       authToken,
       tokenProfiles: envConfig.bridge.tokenProfiles,
     });
-    console.log(`StarkHarness server listening on ${bridge.url}`);
+    console.log(`\n  ${bold(cyan('StarkHarness'))} ${dim('server')}`);
+    console.log(`  ${dim(FIGURES.line.repeat(40))}`);
     if (app) {
-      console.log(`App: ${app.name} (${app.manifestPath})`);
+      console.log(`  ${dim('App:')}    ${app.name} ${dim(`(${app.manifestPath})`)}`);
     }
-    console.log(`WebSocket: ${bridge.wsUrl}`);
-    console.log(`Inspector: ${bridge.url}/inspect`);
-    console.log(`POST /run { "prompt": "..." } to chat`);
-    console.log(`POST /stream { "prompt": "..." } for SSE streaming`);
-    console.log(`GET /health, /session, /providers, /tools, /agents, /tasks, /traces`);
+    console.log(`  ${dim('HTTP:')}   ${cyan(bridge.url)}`);
+    console.log(`  ${dim('WS:')}     ${cyan(bridge.wsUrl)}`);
+    console.log(`  ${dim('Inspect:')} ${cyan(`${bridge.url}/inspect`)}`);
+    console.log(`  ${dim(FIGURES.line.repeat(40))}`);
+    console.log(`  ${dim('POST /run, /stream | GET /health, /session, /tools')}\n`);
     process.on('SIGINT', async () => {
       await bridge.close();
       await runtime.shutdown();
