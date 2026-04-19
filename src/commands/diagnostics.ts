@@ -21,6 +21,8 @@ export function buildDiagnostics(runtime) {
       bridge: runtime.env.bridge,
       telemetry: runtime.env.telemetry,
     } : null,
+    observability: runtime.observability?.status?.() ?? null,
+    featureFlags: runtime.featureFlags?.getAll?.() ?? {},
     policy: runtime.permissions.snapshot(),
     conflicts: {
       commands: runtime.pluginDiagnostics.commandConflicts,

@@ -133,6 +133,13 @@ StarkHarness 现在已经提供一层正式的 app 产品化接口：
 - **Live Providers**: Anthropic 与 OpenAI-compatible adapters 已支持真实工具循环和流式响应。
 - **执行隔离**: 当前 `local` 和 `process` 路径已可用；Docker profiles 已存在，但仍属于较早期路径。
 
+### 🏢 6. 企业级控制与可观测层 (`src/enterprise/`, `src/config/`)
+运行时现在已经具备第一阶段的企业能力：
+- **自定义监控上报**: 可将运行时事件上报到自定义监控端点。
+- **自定义 Sentry**: 可将错误类事件转发到配置好的 Sentry DSN。
+- **GrowthBook / Feature Flags**: 支持拉取远程 flags，并与本地 env flags 合并。
+- **企业命令面**: 可以直接通过 CLI 或 bridge 查看 observability、provider/login、feature flags 状态。
+
 ---
 
 ## 🔍 深度解析：内置能力特性
@@ -173,6 +180,9 @@ MCP tools 并不是一个单独硬编码的 builtin，而是以 `mcp__server__to
 | `app-status` | **App 元信息**: 查看当前加载的 `starkharness.app.json`。 |
 | `env-status` | **环境配置**: 查看解析后的 `.env`、feature 开关和 bridge 配置。 |
 | `login-status` | **Provider 登录状态**: 查看哪些模型后端已经配置完成。 |
+| `observability-status` | **企业可观测状态**: 查看监控与 Sentry 集成配置。 |
+| `feature-flags` | **Rollout 状态**: 查看合并后的本地与远程 feature flags。 |
+| `growthbook-sync` | **远程 Flags**: 从 GrowthBook 兼容配置源刷新 flags。 |
 | `web-access-status` | **浏览器/Web 状态**: 查看内置 `web-access` 是否可用、脚本是否齐全、代理地址是什么。 |
 | `auto` | **Auto Mode**: 直接运行 app automation 默认 prompt 或 command。 |
 | `run` | **Agent 循环**: 对给定 prompt 执行完整的 provider-backed agent run。 |
@@ -292,6 +302,7 @@ starter/
 
 - **已经比较扎实**: runtime 装配、多轮执行、mailbox 驱动的多 Agent 编排、bridge authz、持久化、telemetry 与 replay 诊断。
 - **部分实现**: 超出当前浏览器原语层的更高阶 Web 策略、超出 tool loading 的 MCP 能力、Docker 隔离路径，以及路线图中更丰富的 TUI。
+- **企业基础能力已具备**: observability hooks、自定义 Sentry、GrowthBook 兼容远程 flags，以及远程控制诊断已经有第一阶段实现。
 - **仍偏早期**: 包版本仍是 `0.1.0`，`package.json` 依然是 `private`，仓库根目录也还没有真正的 `LICENSE` 文件。
 
 如果你想看更扎实的分析，建议继续读 [架构深潜](./docs/architecture-deep-dive.zh-CN.md) 和 [贡献者指南](./docs/contributor-guide.zh-CN.md)。

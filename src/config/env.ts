@@ -84,9 +84,12 @@ export async function loadRuntimeEnv({ cwd = process.cwd(), envFilePath = null, 
       debug: parseBoolean(raw.STARKHARNESS_DEBUG, false),
     },
     telemetry: {
+      monitoringUrl: raw.STARKHARNESS_MONITORING_URL ?? null,
+      monitoringToken: raw.STARKHARNESS_MONITORING_TOKEN ?? null,
       sentryDsn: raw.STARKHARNESS_SENTRY_DSN ?? null,
       growthBookUrl: raw.STARKHARNESS_GROWTHBOOK_URL ?? null,
       growthBookClientKey: raw.STARKHARNESS_GROWTHBOOK_CLIENT_KEY ?? null,
+      featureFlags: parseJson(raw.STARKHARNESS_FEATURE_FLAGS, {}),
     },
   };
 }
